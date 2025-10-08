@@ -1,14 +1,13 @@
-# Washer
-
 # Washer Game
 
-A TypeScript + React + Three.js game built with Vite.
+A TypeScript + React + Phaser 3 game built with Vite.
 
-## Structure
+## Architecture
 
-- `src/app/` — React UI components (routes, store)
-- `src/game/` — Three.js game engine (to be implemented)
-- Strict TypeScript with path aliases: `@app/*`, `@game/*`
+- **`src/app/`** — React UI layer (routes, components, store)
+- **`src/game/`** — Phaser game engine (scenes, entities, systems)
+- **Strict TypeScript** with path aliases: `@app/*`, `@game/*`
+- **Single persistent canvas** — Phaser mounts once behind React
 
 ## Quick Start
 
@@ -32,21 +31,63 @@ npm run preview
 - `/play/:id` — Gameplay view
 - `/gallery` — Level gallery
 
+## Technology Stack
+
+- **Phaser 3.80** — Game runtime with WebGL rendering
+- **React 18** — UI framework
+- **React Router** — Client-side routing
+- **Zustand** — State management
+- **Vite** — Fast HMR and builds
+- **TypeScript** — Strict mode with enhanced checks
+- **ESLint + Prettier** — Code quality
+
 ## Development
 
-The project uses:
-- **Vite** for fast HMR and builds
-- **TypeScript** in strict mode with enhanced checks
-- **React Router** for navigation
-- **Zustand** for state management
-- **Three.js** for 3D rendering (v0.180.0)
-- **ESLint + Prettier** for code quality
+### Path Aliases
 
-Paths are aliased for clean imports:
 ```typescript
 import { App } from '@app/App';
-import { Engine } from '@game/Engine';
+import { DemoScene } from '@game/phaser/scenes/DemoScene';
 ```
+
+### Phaser Integration
+
+Phaser canvas is mounted **once** on app initialization and persists across route changes:
+
+1. `src/app/boot/phaserHost.ts` — Creates fixed `<div id="game-root">` at z-index 0
+2. `src/game/phaser/PhaserGameHost.ts` — Factory for Phaser.Game instance
+3. `src/main.tsx` — Calls `initializePhaserHost()` before React mounts
+
+The canvas uses `Phaser.Scale.FIT` mode and auto-centers, responding to window resize and DPR changes.
+
+### Adding Scenes
+
+```typescript
+// 1. Create scene class
+export class MyScene extends Phaser.Scene {
+  constructor() {
+    super({ key: 'MyScene' });
+  }
+  // ... preload, create, update
+}
+
+// 2. Attach to host in phaserHost.ts
+phaserHost.attachScenes([{ key: 'MyScene', sceneClass: MyScene }]);
+
+// 3. Start scene
+phaserHost.game.scene.start('MyScene');
+```
+
+### HMR Support
+
+Phaser properly cleans up on hot module reload. The host is destroyed and recreated, preventing memory leaks during development.
+
+## Project Constraints
+
+- **No cross-imports** between `src/app` and `src/game`
+- UI communicates with game via event bus (to be implemented)
+- React UI is positioned above Phaser canvas with `pointer-events: auto`
+- Game canvas has `pointer-events: none` for UI interaction priority
 
 ## Notes
 
