@@ -1,57 +1,23 @@
 import Phaser from 'phaser';
-import { BootScene } from './scenes/BootScene';
-import { PreloadScene } from './scenes/PreloadScene';
-import { GameScene } from './scenes/GameScene';
-import { UIScene } from './scenes/UIScene';
-import { GAME_CONFIG } from './types/constants';
 
-const config: Phaser.Types.Core.GameConfig = {
-  type: Phaser.WEBGL,
-  title: 'Washer',
-  version: '1.0',
-  autoFocus: true,
-  input: {
-    keyboard: true,
-    mouse: true,
-    touch: true,
-    gamepad: false,
-  },
-  disableContextMenu: false,
-  transparent: false,
-  banner: false,
-  dom: {
-    createContainer: false,
-  },
-  parent: document.body,
-  width: GAME_CONFIG.WIDTH,
-  height: GAME_CONFIG.HEIGHT,
-  pixelArt: false,
-  roundPixels: false,
-  antialias: true,
-  antialiasGL: true,
-  backgroundColor: '#2d2d2d',
+import BootScene from './scenes/BootScene';
+import GameScene from './scenes/GameScene';
+import PreloadScene from './scenes/PreloadScene';
+import UIScene from './scenes/UIScene';
+
+const BASE_WIDTH = 720;
+const BASE_HEIGHT = 540;
+
+const GAME_CONFIG: Phaser.Types.Core.GameConfig = {
+  type: Phaser.AUTO,
+  width: BASE_WIDTH,
+  height: BASE_HEIGHT,
   scale: {
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,
-    width: GAME_CONFIG.WIDTH,
-    height: GAME_CONFIG.HEIGHT,
-    min: {
-      width: 320,
-      height: 180,
-    },
-    max: {
-      width: GAME_CONFIG.WIDTH * 2,
-      height: GAME_CONFIG.HEIGHT * 2,
-    },
   },
-  physics: {
-    default: 'arcade',
-    arcade: {
-      gravity: { x: 0, y: 0 },
-      debug: false,
-    },
-  },
+  backgroundColor: '#10131a',
   scene: [BootScene, PreloadScene, GameScene, UIScene],
 };
 
-export const game = new Phaser.Game(config);
+export default new Phaser.Game(GAME_CONFIG);
