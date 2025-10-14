@@ -31,6 +31,8 @@ export default class GameScene extends Phaser.Scene {
   private stroke!: StrokeSystem; // Turns drag path into stamps.
   private overlayDirty = false; // Track overlay refresh requests.
   private overlayCooldown = 0; // Throttle overlay refresh cadence.
+  private won = false; // Prevent double-win triggers.
+  private seed = Math.max(1, Date.now() & 0xffff); // Current level seed.
   private debugTick = 0; // Tracks debug log cadence.
   private readonly maxBoxRatio = 0.7; // Portion of screen reserved for the object.
   private readonly handleResize = () => {
@@ -59,16 +61,10 @@ export default class GameScene extends Phaser.Scene {
       0.5,
     ); // Build silhouette mask once for clipping.
 
-    const seed = Phaser.Math.Between(1, 0x7fffffff);
-    this.rng = new RNG(seed);
     const maskSize = this.silhouette.getSize();
     this.dirt = new DirtSystem(maskSize, layers, this.silhouette);
-    this.dirt.init(this.rng, DEFAULT_COVERAGE);
-    const maps = this.dirt.getMapsForShader();
-    this.overlay = new DirtDebugOverlay(this, this.obj, maps.size);
-    this.overlay.updateUnion(maps.map0, maps.map1);
-    this.overlayDirty = false;
-    this.overlayCooldown = 0;
+    this.overlay = new DirtDebugOverlay(this, this.obj, maskSize);
+    this.reinitLevel(false); // what: seed dirt maps and overlay for first run.
     this.progressTimer = this.time.addEvent({
       delay: 200,
       loop: true,
@@ -76,6 +72,9 @@ export default class GameScene extends Phaser.Scene {
         const unionRatio = this.dirt.getUnionDirtyRatio();
         const cleanPercent = (1 - unionRatio) * 100;
         this.game.events.emit('PROGRESS', cleanPercent); // Emit clean percent to UI; UI lerps for smooth feel.
+        if (!this.won && cleanPercent >= 95) {
+          this.handleWin(cleanPercent);
+        }
         if (GameScene.DEBUG) {
           this.debugTick += 1;
           if (this.debugTick % 5 === 0) {
@@ -86,11 +85,17 @@ export default class GameScene extends Phaser.Scene {
       },
     }); // Update at ~5 Hz to keep CPU/GPU cost low.
 
+    this.game.events.on('RESTART', this.handleRestart, this);
+    this.game.events.on('NEXT', this.handleNext, this);
+
     this.inputSvc = new InputService(this); // Normalize pointer events into world-space samples.
     this.stroke = new StrokeSystem(this, catalog.tool, this.dirt, (wx, wy) =>
       this.worldToLocal(wx, wy),
     );
     this.inputSvc.onDown((p) => {
+      if (this.won) {
+        return; // why: lock input after win.
+      }
       this.stroke.setActive(true);
       this.stroke.handleDown(p.x, p.y, p.t);
       if (GameScene.DEBUG) {
@@ -99,9 +104,15 @@ export default class GameScene extends Phaser.Scene {
       }
     });
     this.inputSvc.onMove((p) => {
+      if (this.won) {
+        return;
+      }
       this.stroke.handleMove(p.x, p.y, p.t);
     });
     this.inputSvc.onUp((p) => {
+      if (this.won) {
+        return;
+      }
       this.stroke.handleUp(p.x, p.y, p.t);
       if (GameScene.DEBUG) {
         // eslint-disable-next-line no-console -- Minimal pointer debug.
@@ -124,7 +135,7 @@ export default class GameScene extends Phaser.Scene {
         filledRatio.toFixed(3),
       );
       // eslint-disable-next-line no-console -- Debug dirt initialization output.
-      console.log('[Dirt]', 'seed=', seed, 'unionDirty=', unionDirty);
+      console.log('[Dirt]', 'seed=', this.seed, 'unionDirty=', unionDirty);
     }
 
     this.layoutObject();
@@ -212,12 +223,64 @@ export default class GameScene extends Phaser.Scene {
     return Phaser.Math.Clamp(value, UV_EPSILON, 1 - UV_EPSILON); // Clamp UV with a tiny epsilon for stability.
   }
 
+  private handleWin(cleanPercent: number): void {
+    this.won = true;
+    if (this.stroke) {
+      this.stroke.setActive(false); // Lock input when win condition met.
+    }
+    this.game.events.emit('WIN');
+    if (GameScene.DEBUG) {
+      // eslint-disable-next-line no-console -- Report win threshold hit.
+      console.log('[Win]', `clean=${cleanPercent.toFixed(1)}%`);
+    }
+  }
+
+  private handleRestart(): void {
+    this.reinitLevel(false); // what: reset with current seed for repeatability.
+  }
+
+  private handleNext(): void {
+    this.reinitLevel(true); // what: reseed for a fresh layout.
+  }
+
+  private reinitLevel(reseed: boolean): void {
+    if (reseed) {
+      const randomOffset = Phaser.Math.Between(1, 0xffff);
+      this.seed = Math.max(1, (Date.now() & 0xffff) ^ randomOffset); // why: derive new seed while avoiding zero.
+    }
+    this.rng = new RNG(this.seed);
+    this.dirt.init(this.rng, DEFAULT_COVERAGE);
+    const { map0, map1 } = this.dirt.getMapsForShader();
+    this.overlay.updateUnion(map0, map1);
+    const cleanPercent = (1 - this.dirt.getUnionDirtyRatio()) * 100;
+    this.game.events.emit('PROGRESS', cleanPercent);
+    this.overlayDirty = false;
+    this.overlayCooldown = 0;
+    this.won = false;
+    this.debugTick = 0;
+    if (this.stroke) {
+      this.stroke.setActive(false); // why: wait for next press after reset.
+    }
+    if (GameScene.DEBUG) {
+      // eslint-disable-next-line no-console -- Track level resets.
+      console.log(
+        '[Level]',
+        'seed=',
+        this.seed,
+        'clean=',
+        cleanPercent.toFixed(1),
+      );
+    }
+  }
+
   private onShutdown(): void {
     this.scale.off('resize', this.handleResize, this); // Remove resize handler when scene shuts down.
     this.progressTimer?.remove();
     if (this.stroke) {
       this.stroke.setActive(false);
     }
+    this.game.events.off('RESTART', this.handleRestart, this);
+    this.game.events.off('NEXT', this.handleNext, this);
     this.inputSvc.destroy();
     this.overlay.destroy();
   }
