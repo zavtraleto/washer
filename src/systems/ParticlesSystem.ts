@@ -1,26 +1,72 @@
 import Phaser from 'phaser';
 
 const TEXTURE_KEY = 'particle_circle';
-const MAX_PARTICLES = 120;
-const MAX_BURST = 8;
-const BASE_BURST = 4;
-const BURST_SCALE = 6;
-const SPEED_MIN = 150;
-const SPEED_MAX = 280;
-const ANGLE_JITTER = 0.4; // ~23° cone for organic spread.
-const GRAVITY_MIN = 320;
-const GRAVITY_MAX = 360;
-const DRAG_MIN = 0.88;
-const DRAG_MAX = 0.94;
-const LIFE_MIN = 0.35;
-const LIFE_MAX = 0.6;
-const SCALE_MIN = 0.5;
-const SCALE_MAX = 0.9;
-const ALPHA_MIN = 0.7;
-const ALPHA_MAX = 1.0;
-const COLOR_MOLD = 0x33ff66;
-const COLOR_GREASE = 0x8a5a2b;
-const DEBUG_PARTICLES = false;
+const DEBUG_PARTICLES = true; // Enable to see particle spawn counts.
+
+// Water particles config (cleaning spray from cursor).
+const WATER_CONFIG = {
+  maxParticles: 80,
+  maxBurst: 10,
+  baseBurst: 6,
+  burstScale: 5,
+  speedMin: 200,
+  speedMax: 380,
+  angleJitter: 0.35, // ~20° cone for splashy spray.
+  gravityMin: 250,
+  gravityMax: 350,
+  dragMin: 0.91,
+  dragMax: 0.95,
+  lifeMin: 0.4,
+  lifeMax: 0.75,
+  scaleMin: 0.6,
+  scaleMax: 1.0,
+  alphaMin: 0.7,
+  alphaMax: 0.95,
+  colors: [0x4da6ff, 0x6bb8ff, 0xffffff], // Blue and white water tones.
+};
+
+// Dirt particles config (heavy particles from dirty surface).
+const DIRT_CONFIG = {
+  maxParticles: 100,
+  maxBurst: 15,
+  baseBurst: 8,
+  burstScale: 8,
+  speedMin: 180,
+  speedMax: 320,
+  angleJitter: 0.12, // ~7° cone for directional spray.
+  gravityMin: 600,
+  gravityMax: 750,
+  dragMin: 0.96,
+  dragMax: 0.98,
+  lifeMin: 0.8,
+  lifeMax: 1.4,
+  scaleMin: 1.2,
+  scaleMax: 2.5,
+  alphaMin: 0.8,
+  alphaMax: 1.0,
+  colors: [0x6b5d54, 0x4a3f38, 0x595550], // Muted dirt tones.
+};
+
+interface ParticleConfig {
+  maxParticles: number;
+  maxBurst: number;
+  baseBurst: number;
+  burstScale: number;
+  speedMin: number;
+  speedMax: number;
+  angleJitter: number;
+  gravityMin: number;
+  gravityMax: number;
+  dragMin: number;
+  dragMax: number;
+  lifeMin: number;
+  lifeMax: number;
+  scaleMin: number;
+  scaleMax: number;
+  alphaMin: number;
+  alphaMax: number;
+  colors: number[];
+}
 
 interface ParticleState {
   sprite: Phaser.GameObjects.Image;
@@ -37,10 +83,12 @@ interface ParticleState {
   active: boolean;
 }
 
-// Tiny pooled particle images for cheap, pretty spray.
+// Manages two separate particle pools: water (from cursor) and dirt (from dirty surface).
 export class ParticlesSystem {
-  private readonly particles: ParticleState[] = [];
-  private activeCount = 0;
+  private readonly waterParticles: ParticleState[] = [];
+  private readonly dirtParticles: ParticleState[] = [];
+  private waterActiveCount = 0;
+  private dirtActiveCount = 0;
   private depth = 0;
   private scaleFactor = 1;
   private debugTimer = 0;
@@ -53,62 +101,69 @@ export class ParticlesSystem {
     this.depth = this.objectMesh.depth + 1;
     this.scaleFactor = this.computeObjectScale();
 
-    for (let i = 0; i < MAX_PARTICLES; i += 1) {
-      const sprite = scene.add
-        .image(objectMesh.x, objectMesh.y, TEXTURE_KEY)
-        .setActive(false)
-        .setVisible(false)
-        .setDepth(this.depth)
-        .setBlendMode(Phaser.BlendModes.ADD);
+    // Create water particle pool.
+    for (let i = 0; i < WATER_CONFIG.maxParticles; i += 1) {
+      this.waterParticles.push(this.createParticle(objectMesh.x, objectMesh.y));
+    }
 
-      this.particles.push({
-        sprite,
-        x: objectMesh.x,
-        y: objectMesh.y,
-        vx: 0,
-        vy: 0,
-        life: 0,
-        maxLife: 0,
-        drag: 0.9,
-        gravity: 0,
-        baseAlpha: 1,
-        baseScale: 1,
-        active: false,
-      });
+    // Create dirt particle pool.
+    for (let i = 0; i < DIRT_CONFIG.maxParticles; i += 1) {
+      this.dirtParticles.push(this.createParticle(objectMesh.x, objectMesh.y));
     }
   }
 
-  spawn(
+  // Spawn water particles (always from cursor when cleaning).
+  spawnWater(
     x: number,
     y: number,
     dirX: number,
     dirY: number,
     intensity: number,
   ): void {
-    const available = MAX_PARTICLES - this.activeCount;
-    if (available <= 0) {
-      return; // Pool exhausted; skip burst to keep FPS solid.
-    }
+    this.spawnBurst(
+      this.waterParticles,
+      WATER_CONFIG,
+      x,
+      y,
+      dirX,
+      dirY,
+      intensity,
+      () => {
+        this.waterActiveCount += 1;
+      },
+    );
+  }
 
-    const normalized = this.normalizeDirection(dirX, dirY);
-    const clampedIntensity = Phaser.Math.Clamp(intensity, 0.3, 1.5);
-    const desired = Math.round(BASE_BURST + clampedIntensity * BURST_SCALE);
-    const count = Math.min(MAX_BURST, Math.max(1, desired), available);
-
-    for (let i = 0; i < count; i += 1) {
-      const particle = this.acquire();
-      if (!particle) {
-        break;
-      }
-      this.activateParticle(
-        particle,
-        x,
-        y,
-        normalized.x,
-        normalized.y,
-        clampedIntensity,
+  // Spawn dirt particles (only when hitting dirty areas).
+  spawnDirt(
+    x: number,
+    y: number,
+    dirX: number,
+    dirY: number,
+    intensity: number,
+  ): void {
+    if (DEBUG_PARTICLES && Math.random() < 0.1) {
+      // eslint-disable-next-line no-console
+      console.log(
+        '[Particles] Spawning dirt at',
+        x.toFixed(0),
+        y.toFixed(0),
+        'intensity=',
+        intensity.toFixed(2),
       );
     }
+    this.spawnBurst(
+      this.dirtParticles,
+      DIRT_CONFIG,
+      x,
+      y,
+      dirX,
+      dirY,
+      intensity,
+      () => {
+        this.dirtActiveCount += 1;
+      },
+    );
   }
 
   update(dtSeconds: number): void {
@@ -118,39 +173,41 @@ export class ParticlesSystem {
 
     const depth = this.objectMesh.depth + 1;
 
-    for (const particle of this.particles) {
-      if (!particle.active) {
-        continue;
+    // Update water particles.
+    for (const particle of this.waterParticles) {
+      if (particle.active) {
+        this.updateParticle(particle, dtSeconds, depth);
+        if (particle.life >= particle.maxLife) {
+          this.deactivate(particle, () => {
+            this.waterActiveCount = Math.max(0, this.waterActiveCount - 1);
+          });
+        }
       }
+    }
 
-      particle.vy += particle.gravity * dtSeconds;
-      particle.x += particle.vx * dtSeconds;
-      particle.y += particle.vy * dtSeconds;
-      particle.vx *= particle.drag;
-      particle.vy *= particle.drag;
-      particle.life += dtSeconds;
-
-      const t = particle.life / particle.maxLife;
-      if (t >= 1) {
-        this.deactivate(particle);
-        continue;
+    // Update dirt particles.
+    for (const particle of this.dirtParticles) {
+      if (particle.active) {
+        this.updateParticle(particle, dtSeconds, depth);
+        if (particle.life >= particle.maxLife) {
+          this.deactivate(particle, () => {
+            this.dirtActiveCount = Math.max(0, this.dirtActiveCount - 1);
+          });
+        }
       }
-
-      const alpha = particle.baseAlpha * (1 - t);
-      const scale = particle.baseScale * (0.7 + 0.3 * (1 - t));
-
-      particle.sprite
-        .setAlpha(alpha)
-        .setScale(scale)
-        .setPosition(particle.x, particle.y)
-        .setDepth(depth);
     }
 
     if (DEBUG_PARTICLES) {
       this.debugTimer += dtSeconds;
       if (this.debugTimer >= 1) {
         // eslint-disable-next-line no-console -- Debug particle count.
-        console.log('[Particles]', 'active=', this.activeCount);
+        console.log(
+          '[Particles]',
+          'water=',
+          this.waterActiveCount,
+          'dirt=',
+          this.dirtActiveCount,
+        );
         this.debugTimer = 0;
       }
     }
@@ -163,7 +220,8 @@ export class ParticlesSystem {
     this.scaleFactor = newScale;
     this.depth = newDepth;
 
-    for (const particle of this.particles) {
+    const allParticles = [...this.waterParticles, ...this.dirtParticles];
+    for (const particle of allParticles) {
       particle.sprite.setDepth(newDepth);
       if (particle.active) {
         particle.baseScale *= scaleRatio;
@@ -173,9 +231,18 @@ export class ParticlesSystem {
   }
 
   clear(): void {
-    for (const particle of this.particles) {
+    for (const particle of this.waterParticles) {
       if (particle.active) {
-        this.deactivate(particle);
+        this.deactivate(particle, () => {
+          this.waterActiveCount = Math.max(0, this.waterActiveCount - 1);
+        });
+      }
+    }
+    for (const particle of this.dirtParticles) {
+      if (particle.active) {
+        this.deactivate(particle, () => {
+          this.dirtActiveCount = Math.max(0, this.dirtActiveCount - 1);
+        });
       }
     }
     this.debugTimer = 0;
@@ -183,10 +250,12 @@ export class ParticlesSystem {
 
   destroy(): void {
     this.clear();
-    for (const particle of this.particles) {
+    const allParticles = [...this.waterParticles, ...this.dirtParticles];
+    for (const particle of allParticles) {
       particle.sprite.destroy();
     }
-    this.particles.length = 0;
+    this.waterParticles.length = 0;
+    this.dirtParticles.length = 0;
   }
 
   private ensureTexture(): void {
@@ -200,25 +269,106 @@ export class ParticlesSystem {
     graphics.destroy();
   }
 
+  private createParticle(x: number, y: number): ParticleState {
+    const sprite = this.scene.add
+      .image(x, y, TEXTURE_KEY)
+      .setActive(false)
+      .setVisible(false)
+      .setDepth(this.depth)
+      .setBlendMode(Phaser.BlendModes.NORMAL);
+
+    return {
+      sprite,
+      x,
+      y,
+      vx: 0,
+      vy: 0,
+      life: 0,
+      maxLife: 0,
+      drag: 0.9,
+      gravity: 0,
+      baseAlpha: 1,
+      baseScale: 1,
+      active: false,
+    };
+  }
+
+  private spawnBurst(
+    pool: ParticleState[],
+    config: ParticleConfig,
+    x: number,
+    y: number,
+    dirX: number,
+    dirY: number,
+    intensity: number,
+    onActivate: () => void,
+  ): void {
+    const activeCount = pool.filter((p) => p.active).length;
+    const available = config.maxParticles - activeCount;
+    if (available <= 0) {
+      return; // Pool exhausted; skip burst to keep FPS solid.
+    }
+
+    const normalized = this.normalizeDirection(dirX, dirY);
+    const clampedIntensity = Phaser.Math.Clamp(intensity, 0.3, 1.5);
+    const desired = Math.round(
+      config.baseBurst + clampedIntensity * config.burstScale,
+    );
+    const count = Math.min(config.maxBurst, Math.max(1, desired), available);
+
+    for (let i = 0; i < count; i += 1) {
+      const particle = this.acquire(pool);
+      if (!particle) {
+        break;
+      }
+      this.activateParticle(
+        particle,
+        config,
+        x,
+        y,
+        normalized.x,
+        normalized.y,
+        clampedIntensity,
+      );
+      onActivate();
+    }
+  }
+
   private activateParticle(
     particle: ParticleState,
+    config: ParticleConfig,
     x: number,
     y: number,
     dirX: number,
     dirY: number,
     intensity: number,
   ): void {
-    const angleOffset = Phaser.Math.FloatBetween(-ANGLE_JITTER, ANGLE_JITTER);
+    const angleOffset = Phaser.Math.FloatBetween(
+      -config.angleJitter,
+      config.angleJitter,
+    );
     const angle = Math.atan2(dirY, dirX) + angleOffset;
-    const speed = Phaser.Math.FloatBetween(SPEED_MIN, SPEED_MAX) * intensity;
+    const speed =
+      Phaser.Math.FloatBetween(config.speedMin, config.speedMax) * intensity;
     const vx = Math.cos(angle) * speed;
     const vy = Math.sin(angle) * speed;
-    const maxLife = Phaser.Math.FloatBetween(LIFE_MIN, LIFE_MAX);
-    const gravity = Phaser.Math.FloatBetween(GRAVITY_MIN, GRAVITY_MAX);
-    const drag = Phaser.Math.FloatBetween(DRAG_MIN, DRAG_MAX);
+    const maxLife = Phaser.Math.FloatBetween(config.lifeMin, config.lifeMax);
+    const gravity = Phaser.Math.FloatBetween(
+      config.gravityMin,
+      config.gravityMax,
+    );
+    const drag = Phaser.Math.FloatBetween(config.dragMin, config.dragMax);
     const baseScale =
-      Phaser.Math.FloatBetween(SCALE_MIN, SCALE_MAX) * this.scaleFactor;
-    const baseAlpha = Phaser.Math.FloatBetween(ALPHA_MIN, ALPHA_MAX);
+      Phaser.Math.FloatBetween(config.scaleMin, config.scaleMax) *
+      this.scaleFactor;
+    const baseAlpha = Phaser.Math.FloatBetween(
+      config.alphaMin,
+      config.alphaMax,
+    );
+
+    // Add shape variation for dirt particles (squish/stretch).
+    const scaleX = baseScale * Phaser.Math.FloatBetween(0.7, 1.3);
+    const scaleY = baseScale * Phaser.Math.FloatBetween(0.7, 1.3);
 
     particle.x = x;
     particle.y = y;
@@ -237,20 +387,41 @@ export class ParticlesSystem {
       .setVisible(true)
       .setPosition(x, y)
       .setAlpha(baseAlpha)
-      .setScale(baseScale)
+      .setScale(scaleX, scaleY)
       .setDepth(this.depth)
-      .setTint(this.pickTint());
-
-    this.activeCount += 1;
+      .setTint(this.pickColor(config.colors));
   }
 
-  private deactivate(particle: ParticleState): void {
+  private updateParticle(
+    particle: ParticleState,
+    dtSeconds: number,
+    depth: number,
+  ): void {
+    particle.vy += particle.gravity * dtSeconds;
+    particle.x += particle.vx * dtSeconds;
+    particle.y += particle.vy * dtSeconds;
+    particle.vx *= particle.drag;
+    particle.vy *= particle.drag;
+    particle.life += dtSeconds;
+
+    const t = particle.life / particle.maxLife;
+    const alpha = particle.baseAlpha * (1 - t);
+    const scale = particle.baseScale * (0.7 + 0.3 * (1 - t));
+
+    particle.sprite
+      .setAlpha(alpha)
+      .setScale(scale)
+      .setPosition(particle.x, particle.y)
+      .setDepth(depth);
+  }
+
+  private deactivate(particle: ParticleState, onDeactivate: () => void): void {
     if (!particle.active) {
       return;
     }
     particle.active = false;
     particle.sprite.setActive(false).setVisible(false);
-    this.activeCount = Math.max(0, this.activeCount - 1);
+    onDeactivate();
   }
 
   private normalizeDirection(
@@ -264,8 +435,8 @@ export class ParticlesSystem {
     return { x: dirX / length, y: dirY / length };
   }
 
-  private acquire(): ParticleState | undefined {
-    for (const particle of this.particles) {
+  private acquire(pool: ParticleState[]): ParticleState | undefined {
+    for (const particle of pool) {
       if (!particle.active) {
         return particle;
       }
@@ -281,11 +452,8 @@ export class ParticlesSystem {
     return baseSize / 512; // Normalize to a typical object size.
   }
 
-  private pickTint(): number {
-    const t = Phaser.Math.FloatBetween(0, 1);
-    if (t < 0.5) {
-      return COLOR_MOLD;
-    }
-    return COLOR_GREASE;
+  private pickColor(colors: number[]): number {
+    const index = Math.floor(Math.random() * colors.length);
+    return colors[index] ?? 0xffffff;
   }
 }

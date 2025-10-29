@@ -94,10 +94,10 @@ export default class GameScene extends Phaser.Scene {
     this.mesh.panZ(1.5); // Moderate 3D perspective for visual depth.
 
     // Create debug graphics to visualize mesh bounds.
-    if (GameScene.DEBUG) {
-      this.debugGraphics = this.add.graphics();
-      this.debugGraphics.setDepth(1000); // Render on top of everything.
-    }
+    // if (GameScene.DEBUG) {
+    //   this.debugGraphics = this.add.graphics();
+    //   this.debugGraphics.setDepth(1000); // Render on top of everything.
+    // }
 
     this.silhouette = new SilhouetteClip(
       this,
@@ -147,7 +147,27 @@ export default class GameScene extends Phaser.Scene {
       this.dirt,
       (wx, wy) => this.worldToLocal(wx, wy),
       (sx, sy, dirX, dirY, intensity) => {
-        this.particles.spawn(sx, sy, dirX, dirY, intensity); // what: spawn a short burst per stamp.
+        // Always spawn water particles at cursor position (cleaning spray).
+        this.particles.spawnWater(sx, sy, dirX, dirY, intensity);
+
+        // Check if we're hitting a dirty area and spawn dirt particles.
+        const { u, v } = this.worldToLocal(sx, sy);
+        const dirtValue = this.dirt.getUnionDirtyValueAt(u, v);
+
+        // Debug: log dirt values to see what's happening
+        if (GameScene.DEBUG && Math.random() < 0.05) {
+          // eslint-disable-next-line no-console
+          console.log(
+            '[Particles]',
+            `u=${u.toFixed(2)} v=${v.toFixed(2)} dirt=${dirtValue.toFixed(2)}`,
+          );
+        }
+
+        if (dirtValue > 0.05) {
+          // Spawn dirt even on lightly dirty areas
+          const dirtIntensity = Math.min(intensity * (dirtValue + 0.5), 2.0);
+          this.particles.spawnDirt(sx, sy, dirX, dirY, dirtIntensity);
+        }
       },
     );
     this.inputSvc.onDown((p) => {
