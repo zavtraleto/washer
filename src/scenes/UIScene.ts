@@ -15,6 +15,8 @@ export default class UIScene extends Phaser.Scene {
   private value = 0; // Lerped UI value.
   private text!: Phaser.GameObjects.Text;
   private bar!: Phaser.GameObjects.Graphics;
+  private btnRestart!: Phaser.GameObjects.Text;
+  private btnNext!: Phaser.GameObjects.Text;
   private barWidth = 0;
   private readonly handleResize = () => this.layout(); // Keep UI centered on resize.
 
@@ -29,7 +31,11 @@ export default class UIScene extends Phaser.Scene {
     this.bar = this.add.graphics();
     this.layout();
     this.drawBar();
+    this.createButtons();
     this.game.events.on('PROGRESS', this.handleProgress, this); // Listen for clean percent updates.
+    this.game.events.on('WIN', this.handleWin, this); // Reveal Next button on win.
+    this.game.events.on('RESTART', this.handleReset, this);
+    this.game.events.on('NEXT', this.handleReset, this);
     this.scale.on('resize', this.handleResize, this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.onShutdown, this);
   }
@@ -51,6 +57,12 @@ export default class UIScene extends Phaser.Scene {
     const barX = (width - this.barWidth) * 0.5;
     const barY = this.text.y + this.text.height + BAR_PADDING;
     this.bar.setPosition(barX, barY);
+    if (this.btnRestart) {
+      this.btnRestart.setPosition(width - 16, TOP_PADDING);
+    }
+    if (this.btnNext) {
+      this.btnNext.setPosition(width - 16, TOP_PADDING + 24);
+    }
   }
 
   private drawBar(): void {
@@ -62,8 +74,45 @@ export default class UIScene extends Phaser.Scene {
     this.bar.fillRoundedRect(0, 0, fillWidth, BAR_HEIGHT, 4);
   }
 
+  private createButtons(): void {
+    const buttonStyle: Phaser.Types.GameObjects.Text.TextStyle = {
+      fontFamily: 'Inter, Arial, sans-serif',
+      fontSize: '14px',
+      color: '#ffffff',
+    };
+    const width = this.scale.width;
+    this.btnRestart = this.add
+      .text(width - 16, TOP_PADDING, 'Restart', buttonStyle)
+      .setOrigin(1, 0)
+      .setInteractive({ useHandCursor: true });
+    this.btnRestart.on('pointerup', () => {
+      this.game.events.emit('RESTART'); // what: restart requested by player.
+    });
+
+    this.btnNext = this.add
+      .text(width - 16, TOP_PADDING + 24, 'Next', buttonStyle)
+      .setOrigin(1, 0)
+      .setInteractive({ useHandCursor: true })
+      .setVisible(false);
+    this.btnNext.on('pointerup', () => {
+      this.game.events.emit('NEXT'); // what: advance to new seed.
+    });
+  }
+
+  private handleWin(): void {
+    this.btnNext.setVisible(true); // why: show Next once win condition met.
+  }
+
+  private handleReset(): void {
+    this.btnNext.setVisible(false); // why: hide Next until next win.
+    this.target = 0;
+  }
+
   private onShutdown(): void {
     this.game.events.off('PROGRESS', this.handleProgress, this);
+    this.game.events.off('WIN', this.handleWin, this);
+    this.game.events.off('RESTART', this.handleReset, this);
+    this.game.events.off('NEXT', this.handleReset, this);
     this.scale.off('resize', this.handleResize, this);
   }
 }

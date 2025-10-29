@@ -186,6 +186,24 @@ export class DirtSystem {
     return dirty / this.insideCount; // Union dirty ratio used by progress UI later.
   }
 
+  // Get the maximum dirt value at a specific UV coordinate (union of all layers).
+  getUnionDirtyValueAt(u: number, v: number): number {
+    const size = this.size;
+    const clampedU = this.clamp01(u);
+    const clampedV = this.clamp01(v);
+    const x = Math.min(size - 1, Math.floor(clampedU * size));
+    const y = Math.min(size - 1, Math.floor(clampedV * size));
+    const index = y * size + x;
+
+    if ((this.mask[index] ?? 0) === 0) {
+      return 0; // Outside silhouette.
+    }
+
+    const map0 = this.ensureMap('mold');
+    const map1 = this.ensureMap('grease');
+    return Math.max(map0[index] ?? 0, map1[index] ?? 0);
+  }
+
   private ensureMap(id: DirtLayerId): Float32Array {
     let map = this.maps.get(id);
     if (!map) {

@@ -9,7 +9,7 @@ export class DirtDebugOverlay {
 
   constructor(
     scene: Phaser.Scene,
-    private readonly objectImage: Phaser.GameObjects.Image,
+    private readonly objectMesh: Phaser.GameObjects.Mesh,
     private readonly size: number,
   ) {
     const key = 'dirt_debug_overlay';
@@ -27,11 +27,11 @@ export class DirtDebugOverlay {
     }
     this.context = context;
     this.imageData = context.createImageData(size, size);
-    this.image = scene.add.image(objectImage.x, objectImage.y, key);
-    this.image.setOrigin(objectImage.originX, objectImage.originY);
+    this.image = scene.add.image(objectMesh.x, objectMesh.y, key);
+    this.image.setOrigin(0.5, 0.5);
     this.image.setAlpha(0.35);
     this.image.setBlendMode(Phaser.BlendModes.NORMAL);
-    this.image.setDepth(objectImage.depth + 1);
+    this.image.setDepth(objectMesh.depth + 1);
     this.relayout();
   }
 
@@ -52,10 +52,10 @@ export class DirtDebugOverlay {
   }
 
   relayout(): void {
-    this.image.setPosition(this.objectImage.x, this.objectImage.y); // Relayout overlay with the object so sizes stay in sync.
+    this.image.setPosition(this.objectMesh.x, this.objectMesh.y); // Relayout overlay with the object so sizes stay in sync.
     this.image.setDisplaySize(
-      this.objectImage.displayWidth,
-      this.objectImage.displayHeight,
+      this.objectMesh.displayWidth,
+      this.objectMesh.displayHeight,
     );
   }
 
