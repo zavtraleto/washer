@@ -12,6 +12,8 @@ export class StrokeSystem {
   private residual = 0;
   private stamped = false;
   private readonly rng: Phaser.Math.RandomDataGenerator;
+  private lastDirX = 0;
+  private lastDirY = -1;
 
   constructor(
     scene: Phaser.Scene,
@@ -21,6 +23,13 @@ export class StrokeSystem {
       x: number,
       y: number,
     ) => { u: number; v: number },
+    private readonly onStamp?: (
+      x: number,
+      y: number,
+      dirX: number,
+      dirY: number,
+      intensity: number,
+    ) => void,
   ) {
     this.rng = new Phaser.Math.RandomDataGenerator([scene.time.now.toString()]);
   }
@@ -37,7 +46,9 @@ export class StrokeSystem {
     this.lastY = y;
     this.lastT = t;
     this.residual = 0;
-    this.placeStamp(x, y, 0, 0); // what: first stamp anchors the stroke immediately.
+    this.lastDirX = 0;
+    this.lastDirY = -1;
+    this.placeStamp(x, y, 0, 0, this.lastDirX, this.lastDirY); // what: first stamp anchors the stroke immediately.
   }
 
   handleMove(x: number, y: number, t: number): void {
@@ -53,6 +64,9 @@ export class StrokeSystem {
 
     this.residual = Math.min(this.residual, spacing);
 
+    const dirX = dist > 0 ? dx / dist : this.lastDirX;
+    const dirY = dist > 0 ? dy / dist : this.lastDirY;
+
     let travelledAlongSegment = 0;
     while (
       this.residual + (dist - travelledAlongSegment) >= spacing &&
@@ -64,7 +78,7 @@ export class StrokeSystem {
       const sx = Phaser.Math.Linear(this.lastX, x, ratio);
       const sy = Phaser.Math.Linear(this.lastY, y, ratio);
       const stampDt = dt * (needed / Math.max(dist, spacing));
-      this.placeStamp(sx, sy, needed, stampDt);
+      this.placeStamp(sx, sy, needed, stampDt, dirX, dirY);
       this.residual = 0;
     }
 
@@ -73,9 +87,13 @@ export class StrokeSystem {
     this.lastX = x;
     this.lastY = y;
     this.lastT = t;
+    if (dist > 0) {
+      this.lastDirX = dirX;
+      this.lastDirY = dirY;
+    }
 
     if (dist === 0 && dt > 0) {
-      this.placeStamp(x, y, 0, dt);
+      this.placeStamp(x, y, 0, dt, this.lastDirX, this.lastDirY);
     }
   }
 
@@ -87,7 +105,11 @@ export class StrokeSystem {
     const dy = y - this.lastY;
     const dist = Math.sqrt(dx * dx + dy * dy);
     const dt = Math.max(0, t - this.lastT);
-    this.placeStamp(x, y, dist, dt);
+    const dirX = dist > 0 ? dx / dist : this.lastDirX;
+    const dirY = dist > 0 ? dy / dist : this.lastDirY;
+    this.placeStamp(x, y, dist, dt, dirX, dirY);
+    this.lastDirX = dirX;
+    this.lastDirY = dirY;
     this.setActive(false);
   }
 
@@ -106,6 +128,8 @@ export class StrokeSystem {
     y: number,
     distance: number,
     dtMs: number,
+    dirX: number,
+    dirY: number,
   ): void {
     const { u, v } = this.worldToUV(x, y);
     const jitter = this.computeJitter();
@@ -113,6 +137,14 @@ export class StrokeSystem {
     const radiusFactor = Math.max(0.2, 1 + jitter) * boost;
     this.dirt.applyStampUV(u, v, this.tool.strength, radiusFactor);
     this.stamped = true;
+
+    if (this.onStamp) {
+      const normalized = this.normalizeDirection(dirX, dirY);
+      const spacing = Math.max(1, this.tool.spacing);
+      const travel = distance > 0 ? distance : spacing * 0.6;
+      const intensity = Phaser.Math.Clamp(travel / spacing, 0.4, 1.4);
+      this.onStamp(x, y, normalized.x, normalized.y, intensity);
+    }
   }
 
   private computeJitter(): number {
@@ -129,5 +161,16 @@ export class StrokeSystem {
     const speed = (distance / dtMs) * 1000; // px per second.
     const normalized = Phaser.Math.Clamp(speed / 600, 0, 1);
     return 1 + 0.15 * normalized; // why: modest radius boost at higher pointer speed.
+  }
+
+  private normalizeDirection(
+    dirX: number,
+    dirY: number,
+  ): { x: number; y: number } {
+    const length = Math.hypot(dirX, dirY);
+    if (length <= 0.0001) {
+      return { x: 0, y: -1 };
+    }
+    return { x: dirX / length, y: dirY / length };
   }
 }

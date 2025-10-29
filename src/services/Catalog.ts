@@ -4,19 +4,19 @@ export function getCatalog(): Catalog {
   return {
     object: {
       id: 'key_v1',
-      sprite: 'assets/objects/key.png',
+      sprite: 'assets/objects/shield.png',
     },
     layers: [
       {
         id: 'mold',
         eraseRate: 1.0,
-        baseRadius: 1.15,
+        baseRadius: 1.5,
         debugColor: 0x33ff66,
       },
       {
         id: 'grease',
         eraseRate: 0.6,
-        baseRadius: 0.85,
+        baseRadius: 1.65,
         debugColor: 0x8a5a2b,
       },
     ],
