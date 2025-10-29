@@ -4,7 +4,7 @@ export function getCatalog(): Catalog {
   return {
     object: {
       id: 'key_v1',
-      sprite: 'assets/objects/shield.png',
+      sprite: 'objects/shield.png',
     },
     layers: [
       {
