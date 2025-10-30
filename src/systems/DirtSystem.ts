@@ -4,7 +4,6 @@ import { RNG } from '../services/RNG';
 
 const BLUR_RADIUS = 2; // Small radius for organic blobs.
 const BLUR_DIAMETER = BLUR_RADIUS * 2 + 1;
-const BINARY_SEARCH_STEPS = 12; // Iterations to approximate target coverage.
 const BASE_RADIUS_PX = 10; // Base brush radius in grid pixels before per-layer scaling.
 
 // Holds two 256² coverage maps (0..1) for mold/grease.
@@ -64,19 +63,67 @@ export class DirtSystem {
         continue;
       }
 
+      // Generate multi-scale noise: large blobs, medium patches, small speckles.
+      const largeLayer = new Float32Array(totalPixels);
+      const mediumLayer = new Float32Array(totalPixels);
+      const smallLayer = new Float32Array(totalPixels);
+
       for (let i = 0; i < totalPixels; i += 1) {
-        this.scratchA[i] = rng.float(); // Seed noise for organic dirt blobs.
+        largeLayer[i] = rng.float();
+        mediumLayer[i] = rng.float();
+        smallLayer[i] = rng.float();
       }
 
-      this.applyBoxBlur(this.scratchA, this.scratchB); // Smooth noise for cohesive patches.
+      // Blur each layer differently (more blur = larger features).
+      this.applyBoxBlur(largeLayer, this.scratchB); // Large blobs (1 pass).
+      this.applyBoxBlur(largeLayer, this.scratchB); // Extra smoothing.
 
-      const threshold = this.findThreshold(this.scratchA, target);
+      this.applyBoxBlur(mediumLayer, this.scratchB); // Medium patches (1 pass).
+
+      // Small layer gets no blur for speckles.
+
+      // Combine layers with weights (40% large, 30% medium, 30% small).
+      for (let i = 0; i < totalPixels; i += 1) {
+        this.scratchA[i] =
+          0.4 * (largeLayer[i] ?? 0) +
+          0.3 * (mediumLayer[i] ?? 0) +
+          0.3 * (smallLayer[i] ?? 0);
+      }
+
+      // Store float coverage (0..1) for thickness variation.
+      // Normalize and scale by target coverage.
+      let actualDirtyCount = 0;
+      let totalCoverage = 0;
 
       for (let i = 0; i < totalPixels; i += 1) {
         const maskValue = this.mask[i] ?? 0;
         const noiseValue = this.scratchA[i] ?? 0;
-        map[i] = maskValue === 1 && noiseValue >= threshold ? 1 : 0;
+
+        if (maskValue === 1) {
+          // Scale noise to create float thickness (0..1).
+          const thickness = noiseValue * target;
+          map[i] = thickness;
+          totalCoverage += thickness;
+
+          if (thickness > 0.05) {
+            actualDirtyCount += 1;
+          }
+        } else {
+          map[i] = 0;
+        }
       }
+
+      const actualCoverage = actualDirtyCount / this.insideCount;
+      const avgThickness = totalCoverage / this.insideCount;
+
+      // eslint-disable-next-line no-console
+      console.log(
+        `[DirtInit] ${layer.id}:`,
+        `target=${target.toFixed(2)}`,
+        `actual=${actualCoverage.toFixed(3)}`,
+        `avgThickness=${avgThickness.toFixed(3)}`,
+        `dirtyPixels=${actualDirtyCount}/${this.insideCount}`,
+      );
     }
 
     // Ensure layers missing from catalog still respect target defaults.
@@ -245,45 +292,6 @@ export class DirtSystem {
         sum += (temp[addIndex] ?? 0) - (temp[removeIndex] ?? 0);
       }
     }
-  }
-
-  private findThreshold(values: Float32Array, target: number): number {
-    if (target >= 1) {
-      return 0; // Full coverage keeps every pixel inside silhouette.
-    }
-    if (target <= 0 || this.insideCount === 0) {
-      return 1; // No coverage desired.
-    }
-
-    let low = 0;
-    let high = 1;
-
-    for (let i = 0; i < BINARY_SEARCH_STEPS; i += 1) {
-      const mid = (low + high) * 0.5;
-      const ratio = this.coverageRatio(values, mid);
-      if (ratio > target) {
-        low = mid;
-      } else {
-        high = mid;
-      }
-    }
-
-    return (low + high) * 0.5;
-  }
-
-  private coverageRatio(values: Float32Array, threshold: number): number {
-    if (this.insideCount === 0) {
-      return 0;
-    }
-    let count = 0;
-    for (let i = 0; i < values.length; i += 1) {
-      const maskValue = this.mask[i] ?? 0;
-      const value = values[i] ?? 0;
-      if (maskValue === 1 && value >= threshold) {
-        count += 1;
-      }
-    }
-    return count / this.insideCount;
   }
 
   private softFalloff(distanceRatio: number): number {

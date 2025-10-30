@@ -9,14 +9,14 @@ export function getCatalog(): Catalog {
     layers: [
       {
         id: 'mold',
-        eraseRate: 1.0,
-        baseRadius: 1.5,
+        eraseRate: 1.5,
+        baseRadius: 1,
         debugColor: 0x33ff66,
       },
       {
         id: 'grease',
         eraseRate: 0.6,
-        baseRadius: 1.65,
+        baseRadius: 1.75,
         debugColor: 0x8a5a2b,
       },
     ],

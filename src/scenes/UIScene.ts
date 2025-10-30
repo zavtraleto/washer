@@ -17,6 +17,7 @@ export default class UIScene extends Phaser.Scene {
   private bar!: Phaser.GameObjects.Graphics;
   private btnRestart!: Phaser.GameObjects.Text;
   private btnNext!: Phaser.GameObjects.Text;
+  private fpsText!: Phaser.GameObjects.Text;
   private barWidth = 0;
   private readonly handleResize = () => this.layout(); // Keep UI centered on resize.
 
@@ -29,6 +30,10 @@ export default class UIScene extends Phaser.Scene {
       .text(this.scale.width * 0.5, TOP_PADDING, 'Clean: 0.0%', TEXT_STYLE)
       .setOrigin(0.5, 0);
     this.bar = this.add.graphics();
+    this.fpsText = this.add
+      .text(16, 16, 'FPS: 60', { ...TEXT_STYLE, fontSize: '14px' })
+      .setOrigin(0, 0)
+      .setAlpha(0.7);
     this.layout();
     this.drawBar();
     this.createButtons();
@@ -43,6 +48,7 @@ export default class UIScene extends Phaser.Scene {
   public override update(): void {
     this.value += (this.target - this.value) * 0.2; // Smooth progress fill.
     this.text.setText(`Clean: ${this.value.toFixed(1)}%`);
+    this.fpsText.setText(`FPS: ${Math.round(this.game.loop.actualFps)}`);
     this.drawBar();
   }
 

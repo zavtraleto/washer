@@ -3,7 +3,7 @@ import Phaser from 'phaser';
 import { getCatalog } from '../services/Catalog';
 import { SilhouetteClip } from '../systems/SilhouetteClip';
 import { DirtSystem } from '../systems/DirtSystem';
-import { DirtTextureRenderer } from '../systems/DirtTextureRenderer';
+import { DirtShaderRenderer } from '../systems/DirtShaderRenderer';
 import { ParticlesSystem } from '../systems/ParticlesSystem';
 import { RNG } from '../services/RNG';
 import { InputService } from '../services/InputService';
@@ -14,8 +14,8 @@ import { OBJECT_TEXTURE_KEY } from './PreloadScene';
 const UV_EPSILON = 1e-6;
 const SILHOUETTE_SIZE = 256;
 const DEFAULT_COVERAGE: Record<DirtLayerId, number> = {
-  mold: 0.8,
-  grease: 0.6,
+  mold: 1.0, // Full coverage: entire silhouette starts dirty.
+  grease: 1.0, // Full coverage: entire silhouette starts dirty.
 };
 
 // Spring physics config for mesh tilt interaction.
@@ -26,13 +26,6 @@ const SPRING_CONFIG = {
   tiltSpeed: 0.15,
 };
 
-// Dirt rendering config (colors and appearance).
-const DIRT_RENDER_CONFIG = {
-  moldColor: 0x33ff66, // Green tint for mold.
-  greaseColor: 0x8a5a2b, // Brown tint for grease.
-  darkenFactor: 0.6, // 60% darkening on dirty areas.
-};
-
 export default class GameScene extends Phaser.Scene {
   private static readonly DEBUG = true; // Toggle minimal debug output.
 
@@ -41,7 +34,7 @@ export default class GameScene extends Phaser.Scene {
   private silhouette!: SilhouetteClip; // Precomputed silhouette mask for clipping logic.
   private dirt!: DirtSystem; // Handles dirt coverage maps and erosion logic.
   private rng!: RNG; // Seeded RNG for repeatable dirt layouts.
-  private dirtRenderer!: DirtTextureRenderer; // Renders dirt directly onto mesh texture.
+  private dirtRenderer!: DirtShaderRenderer; // Renders dirt with texture sampling.
   private progressTimer?: Phaser.Time.TimerEvent; // Periodic progress tick.
   private inputSvc!: InputService; // Normalized pointer stream.
   private stroke!: StrokeSystem; // Turns drag path into stamps.
@@ -94,26 +87,21 @@ export default class GameScene extends Phaser.Scene {
     this.mesh.panZ(1.5); // Moderate 3D perspective for visual depth.
 
     // Create debug graphics to visualize mesh bounds.
-    // if (GameScene.DEBUG) {
-    //   this.debugGraphics = this.add.graphics();
-    //   this.debugGraphics.setDepth(1000); // Render on top of everything.
-    // }
+    if (GameScene.DEBUG) {
+      this.debugGraphics = this.add.graphics();
+      this.debugGraphics.setDepth(1000); // Render on top of everything.
+    }
 
     this.silhouette = new SilhouetteClip(
       this,
       this.objKey,
       SILHOUETTE_SIZE,
-      0.5,
+      0.1, // Lower threshold to include semi-transparent edge pixels.
     ); // Build silhouette mask once for clipping.
 
     const maskSize = this.silhouette.getSize();
     this.dirt = new DirtSystem(maskSize, layers, this.silhouette);
-    this.dirtRenderer = new DirtTextureRenderer(
-      this,
-      this.mesh,
-      this.objKey,
-      DIRT_RENDER_CONFIG,
-    );
+    this.dirtRenderer = new DirtShaderRenderer(this, this.mesh, this.objKey);
     this.particles = new ParticlesSystem(this, this.mesh);
     this.reinitLevel(false); // what: seed dirt maps and overlay for first run.
 
@@ -131,7 +119,12 @@ export default class GameScene extends Phaser.Scene {
           this.debugTick += 1;
           if (this.debugTick % 5 === 0) {
             // eslint-disable-next-line no-console -- Debug overlay cadence.
-            console.log('[Progress]', `clean=${cleanPercent.toFixed(1)}%`);
+            console.log(
+              '[Progress]',
+              `clean=${cleanPercent.toFixed(1)}%`,
+              `dirty=${unionRatio.toFixed(3)}`,
+              `stamped=${this.stroke?.didStampSinceLastCheck() ?? false}`,
+            );
           }
         }
       },
@@ -327,131 +320,58 @@ export default class GameScene extends Phaser.Scene {
     width: number;
     height: number;
   } | null {
-    if (!this.mesh) {
+    if (!this.mesh?.faces || this.mesh.faces.length === 0) {
       return null;
     }
 
-    // Get texture for validation.
-    const texture = this.mesh.texture;
-    if (!texture || !texture.source[0]) {
-      return null;
-    }
+    const worldMatrix = this.mesh.getWorldTransformMatrix();
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
 
-    const texWidth = texture.source[0].width;
-    const texHeight = texture.source[0].height;
+    // Transform all mesh vertices to world space using the transformation matrix.
+    for (const face of this.mesh.faces) {
+      const vertices = [face.vertex1, face.vertex2, face.vertex3];
+      for (const vertex of vertices) {
+        if (!vertex) continue;
 
-    // Strategy 1: Try to use projected vertex coordinates (vx, vy).
-    // These are populated during render, so may not be available immediately.
-    const faces = this.mesh.faces;
+        // Apply world transform: [x', y'] = [a c e] * [vx]
+        //                                    [b d f]   [vy]
+        //                                              [1 ]
+        const worldX =
+          vertex.vx * worldMatrix.a + vertex.vy * worldMatrix.c + worldMatrix.e;
+        const worldY =
+          vertex.vx * worldMatrix.b + vertex.vy * worldMatrix.d + worldMatrix.f;
 
-    if (faces && faces.length > 0) {
-      let minX = Infinity;
-      let maxX = -Infinity;
-      let minY = Infinity;
-      let maxY = -Infinity;
-      let validVertexCount = 0;
-
-      // Get mesh world position to offset the local vertex coordinates.
-      const meshWorldX = this.mesh.x;
-      const meshWorldY = this.mesh.y;
-
-      // Iterate through all face vertices to find screen-space bounds.
-      for (let i = 0; i < faces.length; i += 1) {
-        const face = faces[i];
-        if (!face) {
-          continue;
-        }
-
-        // Each face has vertex1, vertex2, vertex3.
-        const vertices = [face.vertex1, face.vertex2, face.vertex3];
-
-        for (const vertex of vertices) {
-          if (!vertex) {
-            continue;
-          }
-
-          // Vertices have vx, vy which are in local/model space relative to mesh origin.
-          // We need to transform them to world/screen space by adding mesh position.
-          const localX = vertex.vx;
-          const localY = vertex.vy;
-
-          if (Number.isFinite(localX) && Number.isFinite(localY)) {
-            // Transform from local mesh space to world screen space.
-            const screenX = meshWorldX + localX;
-            const screenY = meshWorldY + localY;
-
-            minX = Math.min(minX, screenX);
-            maxX = Math.max(maxX, screenX);
-            minY = Math.min(minY, screenY);
-            maxY = Math.max(maxY, screenY);
-            validVertexCount += 1;
-          }
-        }
-      }
-
-      // If we got valid bounds from vertices, use them.
-      if (
-        validVertexCount > 3 &&
-        Number.isFinite(minX) &&
-        Number.isFinite(maxX) &&
-        Number.isFinite(minY) &&
-        Number.isFinite(maxY)
-      ) {
-        const width = maxX - minX;
-        const height = maxY - minY;
-
-        // Debug: show the calculation.
-        if (GameScene.DEBUG && Math.random() < 0.01) {
-          // eslint-disable-next-line no-console
-          console.log(
-            '[Bounds] vertex-based:',
-            `${validVertexCount} vertices`,
-            `meshPos=(${meshWorldX.toFixed(0)},${meshWorldY.toFixed(0)})`,
-            `screen=(${minX.toFixed(0)},${minY.toFixed(0)}) to (${maxX.toFixed(0)},${maxY.toFixed(0)})`,
-            `size=${width.toFixed(0)}x${height.toFixed(0)}`,
-          );
-        }
-
-        return {
-          left: minX,
-          top: minY,
-          width,
-          height,
-        };
+        minX = Math.min(minX, worldX);
+        maxX = Math.max(maxX, worldX);
+        minY = Math.min(minY, worldY);
+        maxY = Math.max(maxY, worldY);
       }
     }
 
-    // Strategy 2: Calculate bounds manually accounting for panZ perspective.
-    // panZ creates a perspective effect that enlarges the mesh visually.
-    // For panZ(1.5), the visual magnification is approximately 1.3-1.4x.
-    const scale = this.mesh.scaleX;
+    if (!Number.isFinite(minX)) {
+      return null; // No valid vertices found.
+    }
 
-    // Calculate perspective magnification from panZ.
-    // The mesh.modelPosition.z (set by panZ) affects the perceived size.
-    const panZValue = this.mesh.modelPosition.z;
-    const perspectiveMagnification = 1 + panZValue * 0.2; // Approximate formula
+    const bounds = {
+      left: minX,
+      top: minY,
+      width: maxX - minX,
+      height: maxY - minY,
+    };
 
-    const visualWidth = texWidth * scale * perspectiveMagnification;
-    const visualHeight = texHeight * scale * perspectiveMagnification;
-
-    if (GameScene.DEBUG && Math.random() < 0.01) {
+    if (GameScene.DEBUG && Math.random() < 0.02) {
       // eslint-disable-next-line no-console
       console.log(
-        '[Bounds] calculated fallback:',
-        `tex=${texWidth}x${texHeight}`,
-        `scale=${scale.toFixed(3)}`,
-        `panZ=${panZValue.toFixed(2)}`,
-        `magnification=${perspectiveMagnification.toFixed(3)}`,
-        `visual=${visualWidth.toFixed(0)}x${visualHeight.toFixed(0)}`,
+        '[Bounds]',
+        `${bounds.width.toFixed(0)}×${bounds.height.toFixed(0)}`,
+        `at (${bounds.left.toFixed(0)}, ${bounds.top.toFixed(0)})`,
       );
     }
 
-    return {
-      left: this.mesh.x - visualWidth / 2,
-      top: this.mesh.y - visualHeight / 2,
-      width: visualWidth,
-      height: visualHeight,
-    };
+    return bounds;
   }
   public localToWorld(u: number, v: number): { x: number; y: number } {
     if (!this.mesh) {
@@ -493,8 +413,8 @@ export default class GameScene extends Phaser.Scene {
 
     // Update dirt texture every frame for satisfying real-time feedback.
     if (this.overlayDirty) {
-      const { map0, map1 } = this.dirt.getMapsForShader();
-      this.dirtRenderer.updateTexture(map0, map1);
+      const maps = this.dirt.getMapsForShader();
+      this.dirtRenderer.update(maps);
       this.overlayDirty = false;
     }
   }
@@ -638,8 +558,14 @@ export default class GameScene extends Phaser.Scene {
     }
     this.rng = new RNG(this.seed);
     this.dirt.init(this.rng, DEFAULT_COVERAGE);
-    const { map0, map1 } = this.dirt.getMapsForShader();
-    this.dirtRenderer.updateTexture(map0, map1);
+
+    // Check progress BEFORE texture update.
+    const initialClean = (1 - this.dirt.getUnionDirtyRatio()) * 100;
+
+    const maps = this.dirt.getMapsForShader();
+    this.dirtRenderer.update(maps);
+
+    // Check progress AFTER texture update.
     const cleanPercent = (1 - this.dirt.getUnionDirtyRatio()) * 100;
     this.game.events.emit('PROGRESS', cleanPercent);
     this.overlayDirty = false;
@@ -657,7 +583,9 @@ export default class GameScene extends Phaser.Scene {
         '[Level]',
         'seed=',
         this.seed,
-        'clean=',
+        'initialClean=',
+        initialClean.toFixed(1),
+        'afterRender=',
         cleanPercent.toFixed(1),
       );
     }
