@@ -11,7 +11,7 @@ export interface DirtRenderConfig {
 const DEFAULT_CONFIG: DirtRenderConfig = {
   moldColor: 0x33ff66, // Green tint for mold.
   greaseColor: 0x8a5a2b, // Brown tint for grease.
-  darkenFactor: 0.6, // 60% darkening.
+  darkenFactor: 0.75, // 75% darkening.
   textureSize: 256,
 };
 
