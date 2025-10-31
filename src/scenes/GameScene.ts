@@ -14,8 +14,8 @@ import { OBJECT_TEXTURE_KEY } from './PreloadScene';
 const UV_EPSILON = 1e-6;
 const SILHOUETTE_SIZE = 256;
 const DEFAULT_COVERAGE: Record<DirtLayerId, number> = {
-  mold: 0.8,
-  grease: 0.6,
+  mold: 1.0,
+  grease: 1.0,
 };
 
 // Spring physics config for mesh tilt interaction.
@@ -94,10 +94,10 @@ export default class GameScene extends Phaser.Scene {
     this.mesh.panZ(1.5); // Moderate 3D perspective for visual depth.
 
     // Create debug graphics to visualize mesh bounds.
-    // if (GameScene.DEBUG) {
-    //   this.debugGraphics = this.add.graphics();
-    //   this.debugGraphics.setDepth(1000); // Render on top of everything.
-    // }
+    if (GameScene.DEBUG) {
+      this.debugGraphics = this.add.graphics();
+      this.debugGraphics.setDepth(1000); // Render on top of everything.
+    }
 
     this.silhouette = new SilhouetteClip(
       this,
