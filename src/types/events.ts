@@ -15,6 +15,9 @@ export const GameEvents = {
 
   /** Fired when user clicks Next button after winning. No payload. */
   NEXT: 'NEXT',
+
+  /** Fired when user switches tools. Payload: tool id ('scrubber' | 'powerwash'). */
+  SWITCH_TOOL: 'SWITCH_TOOL',
 } as const;
 
 // Gameplay events (within-scene mechanics)

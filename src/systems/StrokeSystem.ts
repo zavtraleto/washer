@@ -5,9 +5,11 @@ import { DirtSystem } from './DirtSystem';
 import { MathUtils } from '../utils/MathUtils';
 import type { GameEventDispatcher } from '../services/GameEventDispatcher';
 
-// Turn drag path into evenly spaced stamps with soft falloff.
+/**
+ * StrokeSystem — converts drag path into evenly-spaced stamps with soft falloff.
+ * Internal helper for scrubbing-style tools.
+ */
 export class StrokeSystem {
-  private active = false;
   private lastX = 0;
   private lastY = 0;
   private lastT = 0;
@@ -30,13 +32,6 @@ export class StrokeSystem {
     this.rng = new Phaser.Math.RandomDataGenerator([scene.time.now.toString()]);
   }
 
-  setActive(active: boolean): void {
-    this.active = active;
-    if (!active) {
-      this.residual = 0;
-    }
-  }
-
   handleDown(x: number, y: number, t: number): void {
     this.lastX = x;
     this.lastY = y;
@@ -44,14 +39,10 @@ export class StrokeSystem {
     this.residual = 0;
     this.lastDirX = 0;
     this.lastDirY = -1;
-    this.placeStamp(x, y, 0, 0, this.lastDirX, this.lastDirY); // what: first stamp anchors the stroke immediately.
+    this.placeStamp(x, y, 0, 0, this.lastDirX, this.lastDirY);
   }
 
   handleMove(x: number, y: number, t: number): void {
-    if (!this.active) {
-      return;
-    }
-
     const dx = x - this.lastX;
     const dy = y - this.lastY;
     const dist = Math.sqrt(dx * dx + dy * dy);
@@ -94,9 +85,6 @@ export class StrokeSystem {
   }
 
   handleUp(x: number, y: number, t: number): void {
-    if (!this.active) {
-      return;
-    }
     const dx = x - this.lastX;
     const dy = y - this.lastY;
     const dist = Math.sqrt(dx * dx + dy * dy);
@@ -106,7 +94,7 @@ export class StrokeSystem {
     this.placeStamp(x, y, dist, dt, dirX, dirY);
     this.lastDirX = dirX;
     this.lastDirY = dirY;
-    this.setActive(false);
+    this.residual = 0; // Reset residual on pointer release.
   }
 
   update(_dt: number): void {

@@ -7,15 +7,18 @@ import { DirtTextureRenderer } from '../systems/DirtTextureRenderer';
 import { ParticlesSystem } from '../systems/ParticlesSystem';
 import { DebugOverlay } from '../systems/DebugOverlay';
 import { TiltController } from '../systems/TiltController';
+import { ToolManager } from '../systems/ToolManager';
 import { RNG } from '../services/RNG';
 import { InputService } from '../services/InputService';
-import { StrokeSystem } from '../systems/StrokeSystem';
 import { MathUtils } from '../utils/MathUtils';
 import { eventBus } from '../services/EventBus';
 import { GameEvents } from '../types/events';
 import { InputController } from '../systems/InputController';
 import { GameContext } from '../services/GameContext';
 import { GameEventDispatcher } from '../services/GameEventDispatcher';
+import { ScrubbingTool } from '../tools/ScrubbingTool';
+import { PowerWashTool } from '../tools/PowerWashTool';
+import type { ITool } from '../types/tools';
 import type { DirtLayerId } from '../types/config';
 import { OBJECT_TEXTURE_KEY } from './PreloadScene';
 
@@ -50,7 +53,9 @@ export default class GameScene extends Phaser.Scene {
   private dirtRenderer!: DirtTextureRenderer; // Renders dirt directly onto mesh texture.
   private progressTimer?: Phaser.Time.TimerEvent; // Periodic progress tick.
   private inputSvc!: InputService; // Normalized pointer stream.
-  private stroke!: StrokeSystem; // Turns drag path into stamps.
+  private toolManager!: ToolManager; // Manages active tool state and switching.
+  private scrubbingTool!: ScrubbingTool; // Scrubbing/brush cleaning tool.
+  private powerWashTool!: PowerWashTool; // Power wash stream cleaning tool.
   private particles!: ParticlesSystem; // Ballistic spray particle pool.
   private debugOverlay!: DebugOverlay; // Visual debug display.
   private tiltController!: TiltController; // Mesh tilt with spring physics.
@@ -135,20 +140,70 @@ export default class GameScene extends Phaser.Scene {
 
     eventBus.on(GameEvents.RESTART, this.handleRestart, this);
     eventBus.on(GameEvents.NEXT, this.handleNext, this);
+    eventBus.on(GameEvents.SWITCH_TOOL, this.handleSwitchTool, this);
 
     this.inputSvc = new InputService(this); // Normalize pointer events into world-space samples.
-    this.stroke = new StrokeSystem(
+
+    // Initialize ToolManager.
+    this.toolManager = new ToolManager();
+
+    // Create tools helper: check if point is on object.
+    const isPointOnObject = (worldX: number, worldY: number): boolean => {
+      const uv = this.worldToLocal(worldX, worldY);
+      // Check if UV is within bounds and silhouette mask is set.
+      if (
+        uv.u < UV_EPSILON ||
+        uv.u > 1 - UV_EPSILON ||
+        uv.v < UV_EPSILON ||
+        uv.v > 1 - UV_EPSILON
+      ) {
+        return false;
+      }
+      const mask = this.silhouette.getMask();
+      const size = this.silhouette.getSize();
+      const pixelX = Math.min(size - 1, Math.floor(uv.u * size));
+      const pixelY = Math.min(size - 1, Math.floor(uv.v * size));
+      const index = pixelY * size + pixelX;
+      return mask[index] === 1;
+    };
+
+    // Create scrubbing tool with current catalog config.
+    const scrubbingConfig = catalog.tools?.scrubber || {
+      id: 'scrubber' as const,
+      name: 'Scrubber' as const,
+      spacing: catalog.tool.spacing,
+      jitter: catalog.tool.jitter,
+      strength: catalog.tool.strength,
+      speedBoost: catalog.tool.speedBoost,
+    };
+
+    this.scrubbingTool = new ScrubbingTool(
       this,
-      catalog.tool,
+      scrubbingConfig,
       this.dirt,
       (wx, wy) => this.worldToLocal(wx, wy),
       this.gameplayEvents,
     );
 
-    // Initialize InputController to coordinate tilt + stroke systems.
+    // Create power wash tool with catalog config.
+    if (catalog.tools?.powerwash) {
+      this.powerWashTool = new PowerWashTool(
+        this,
+        catalog.tools.powerwash,
+        this.dirt,
+        (wx, wy) => this.worldToLocal(wx, wy),
+        isPointOnObject,
+        this.gameplayEvents,
+      );
+    }
+
+    // Set scrubbing tool as default active tool.
+    this.toolManager.setActiveTool(this.scrubbingTool);
+
+    // Initialize InputController to coordinate tilt + tool systems.
     this.inputController = new InputController(
       this.tiltController,
-      this.stroke,
+      this.scrubbingTool,
     );
 
     // Initialize level AFTER all systems are ready.
@@ -356,6 +411,38 @@ export default class GameScene extends Phaser.Scene {
 
     return { x, y }; // Convert UV back to screen coords using actual visual bounds.
   }
+
+  /**
+   * Switch to a different tool. Useful for UI buttons or keyboard shortcuts.
+   * @param tool - Tool to activate.
+   */
+  public switchTool(tool: ITool): void {
+    this.toolManager.setActiveTool(tool);
+    // Update InputController to use the new tool.
+    this.inputController = new InputController(this.tiltController, tool);
+  }
+
+  /**
+   * Get scrubbing tool instance (for UI tool switching).
+   */
+  public getScrubber(): ScrubbingTool {
+    return this.scrubbingTool;
+  }
+
+  /**
+   * Get power wash tool instance (for UI tool switching).
+   */
+  public getPowerWash(): PowerWashTool | undefined {
+    return this.powerWashTool;
+  }
+
+  /**
+   * Get currently active tool.
+   */
+  public getActiveTool(): ITool | null {
+    return this.toolManager.getActiveTool();
+  }
+
   public override update(_time: number, delta: number): void {
     // Update tilt controller.
     this.tiltController.update(delta / 1000);
@@ -377,9 +464,18 @@ export default class GameScene extends Phaser.Scene {
     if (this.particles) {
       this.particles.update(delta / 1000); // Simple ballistic motion step.
     }
-    if (this.stroke) {
-      this.stroke.update(delta);
-      if (this.stroke.didStampSinceLastCheck()) {
+
+    // Update active tool.
+    const activeTool = this.toolManager.getActiveTool();
+    if (activeTool) {
+      activeTool.update(delta);
+      // Check if scrubbing tool made changes (for texture refresh).
+      if (activeTool === this.scrubbingTool) {
+        if (this.scrubbingTool.didStampSinceLastCheck()) {
+          this.overlayDirty = true;
+        }
+      } else {
+        // For other tools (power wash), always mark dirty during active use.
         this.overlayDirty = true;
       }
     }
@@ -412,6 +508,14 @@ export default class GameScene extends Phaser.Scene {
     this.reinitLevel(); // what: derive new seed and recreate dirt layout.
   }
 
+  private handleSwitchTool(toolId: 'scrubber' | 'powerwash'): void {
+    if (toolId === 'scrubber') {
+      this.switchTool(this.scrubbingTool);
+    } else if (toolId === 'powerwash' && this.powerWashTool) {
+      this.switchTool(this.powerWashTool);
+    }
+  }
+
   private reinitLevel(): void {
     // Note: seed management now handled by GameContext in handleRestart/handleNext.
     // This method just uses the current seed from context.
@@ -431,11 +535,10 @@ export default class GameScene extends Phaser.Scene {
   private onShutdown(): void {
     this.scale.off('resize', this.handleResize, this); // Remove resize handler when scene shuts down.
     this.progressTimer?.remove();
-    if (this.stroke) {
-      this.stroke.setActive(false);
-    }
+    this.toolManager.deactivateAll(); // Deactivate all tools on shutdown.
     eventBus.off(GameEvents.RESTART, this.handleRestart);
     eventBus.off(GameEvents.NEXT, this.handleNext);
+    eventBus.off(GameEvents.SWITCH_TOOL, this.handleSwitchTool);
     this.inputSvc.destroy();
     this.dirtRenderer.destroy();
     this.particles.destroy();

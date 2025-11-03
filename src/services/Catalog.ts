@@ -28,5 +28,24 @@ export function getCatalog(): Catalog {
       strength: 1.0,
       speedBoost: true,
     },
+    tools: {
+      scrubber: {
+        id: 'scrubber',
+        name: 'Scrubber',
+        spacing: 10,
+        jitter: 0.08,
+        strength: 1.0,
+        speedBoost: true,
+      },
+      powerwash: {
+        id: 'powerwash',
+        name: 'Power Wash',
+        maxRange: 500, // Max stream distance (px).
+        streamWidth: 20, // Stream visual width (for future rendering).
+        pressure: 1.5, // Higher erosion strength than scrubber.
+        tickRate: 20, // 20 stamps per second for continuous feel.
+        jitter: 0.12,
+      },
+    },
   };
 }

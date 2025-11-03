@@ -7,6 +7,8 @@ const TOP_PADDING = 24;
 const BAR_PADDING = 12;
 const BAR_HEIGHT = 8;
 const BAR_WIDTH_RATIO = 0.6;
+const TOOL_BUTTON_SIZE = 48;
+const TOOL_BUTTON_SPACING = 8;
 const TEXT_STYLE: Phaser.Types.GameObjects.Text.TextStyle = {
   fontFamily: 'Inter, Arial, sans-serif',
   fontSize: '18px',
@@ -20,6 +22,11 @@ export default class UIScene extends Phaser.Scene {
   private bar!: Phaser.GameObjects.Graphics;
   private btnRestart!: Phaser.GameObjects.Text;
   private btnNext!: Phaser.GameObjects.Text;
+  private toolButtons!: {
+    scrubber: Phaser.GameObjects.Container;
+    powerwash: Phaser.GameObjects.Container;
+  };
+  private activeTool: 'scrubber' | 'powerwash' = 'scrubber';
   private barWidth = 0;
   private readonly handleResize = () => this.layout(); // Keep UI centered on resize.
 
@@ -32,9 +39,10 @@ export default class UIScene extends Phaser.Scene {
       .text(this.scale.width * 0.5, TOP_PADDING, 'Clean: 0.0%', TEXT_STYLE)
       .setOrigin(0.5, 0);
     this.bar = this.add.graphics();
-    this.layout();
-    this.drawBar();
     this.createButtons();
+    this.createToolButtons();
+    this.layout(); // Call layout after creating all UI elements.
+    this.drawBar();
     eventBus.on(GameEvents.PROGRESS, this.handleProgress, this); // Listen for clean percent updates.
     eventBus.on(GameEvents.WIN, this.handleWin, this); // Reveal Next button on win.
     eventBus.on(GameEvents.RESTART, this.handleReset, this);
@@ -65,6 +73,15 @@ export default class UIScene extends Phaser.Scene {
     }
     if (this.btnNext) {
       this.btnNext.setPosition(width - 16, TOP_PADDING + 24);
+    }
+    if (this.toolButtons) {
+      // Position tool buttons side-by-side at bottom-left corner.
+      const bottomY = this.scale.height - 16 - TOOL_BUTTON_SIZE;
+      this.toolButtons.scrubber.setPosition(16, bottomY);
+      this.toolButtons.powerwash.setPosition(
+        16 + TOOL_BUTTON_SIZE + TOOL_BUTTON_SPACING,
+        bottomY,
+      );
     }
   }
 
@@ -109,6 +126,99 @@ export default class UIScene extends Phaser.Scene {
   private handleReset(): void {
     this.btnNext.setVisible(false); // why: hide Next until next win.
     this.target = 0;
+  }
+
+  private createToolButtons(): void {
+    // Create tool button helper.
+    const createToolButton = (
+      toolId: 'scrubber' | 'powerwash',
+      icon: string,
+    ): Phaser.GameObjects.Container => {
+      const container = this.add.container(0, 0);
+
+      // Background (square button) - use Rectangle instead of Graphics for better hit detection.
+      const bg = this.add.rectangle(
+        TOOL_BUTTON_SIZE / 2,
+        TOOL_BUTTON_SIZE / 2,
+        TOOL_BUTTON_SIZE,
+        TOOL_BUTTON_SIZE,
+        0x2a2d35,
+        0.9,
+      );
+      bg.setStrokeStyle(2, 0x61d5ff, 0);
+
+      // Icon/Label.
+      const text = this.add
+        .text(TOOL_BUTTON_SIZE / 2, TOOL_BUTTON_SIZE / 2, icon, {
+          fontFamily: 'Inter, Arial, sans-serif',
+          fontSize: '20px',
+          color: '#f2f3f5',
+        })
+        .setOrigin(0.5);
+
+      container.add([bg, text]);
+      container.setSize(TOOL_BUTTON_SIZE, TOOL_BUTTON_SIZE);
+
+      // Make the background rectangle interactive.
+      bg.setInteractive({ useHandCursor: true });
+
+      // Store references for visual updates.
+      (container as any).bg = bg;
+      (container as any).toolId = toolId;
+
+      // Wire up events to the background rectangle.
+      bg.on('pointerdown', () => {
+        this.switchTool(toolId);
+      });
+
+      // Hover effect.
+      bg.on('pointerover', () => {
+        if (this.activeTool !== toolId) {
+          bg.setFillStyle(0x35383f, 0.9);
+        }
+      });
+
+      bg.on('pointerout', () => {
+        this.updateToolButtonVisuals();
+      });
+
+      return container;
+    };
+
+    // Create buttons for both tools.
+    this.toolButtons = {
+      scrubber: createToolButton('scrubber', '🧽'),
+      powerwash: createToolButton('powerwash', '💧'),
+    };
+
+    this.updateToolButtonVisuals();
+  }
+
+  private switchTool(toolId: 'scrubber' | 'powerwash'): void {
+    if (this.activeTool === toolId) return; // Already active.
+
+    this.activeTool = toolId;
+    this.updateToolButtonVisuals();
+
+    // Emit event to GameScene to switch tool.
+    eventBus.emit(GameEvents.SWITCH_TOOL, toolId);
+  }
+
+  private updateToolButtonVisuals(): void {
+    // Update button backgrounds to show active/inactive state.
+    for (const [toolId, container] of Object.entries(this.toolButtons)) {
+      const bg = (container as any).bg as Phaser.GameObjects.Rectangle;
+
+      if (this.activeTool === toolId) {
+        // Active: bright background with border.
+        bg.setFillStyle(0x61d5ff, 0.25);
+        bg.setStrokeStyle(2, 0x61d5ff, 1);
+      } else {
+        // Inactive: dark background, no border.
+        bg.setFillStyle(0x2a2d35, 0.9);
+        bg.setStrokeStyle(2, 0x61d5ff, 0);
+      }
+    }
   }
 
   private onShutdown(): void {

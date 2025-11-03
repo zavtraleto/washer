@@ -1,10 +1,10 @@
 /**
- * InputController — coordinates pointer input with tilt and stroke systems.
+ * InputController — coordinates pointer input with tilt and tool systems.
  * Centralizes input state checks (won, active) and delegates to specialized systems.
  */
 
 import type { TiltController } from './TiltController';
-import type { StrokeSystem } from './StrokeSystem';
+import type { ITool } from '../types/tools';
 
 export class InputController {
   private inputActive = false;
@@ -12,7 +12,7 @@ export class InputController {
 
   constructor(
     private tiltController: TiltController,
-    private strokeSystem: StrokeSystem,
+    private tool: ITool,
   ) {}
 
   /**
@@ -26,8 +26,7 @@ export class InputController {
 
     this.inputActive = true;
     this.tiltController.startInteraction();
-    this.strokeSystem.setActive(true);
-    this.strokeSystem.handleDown(x, y, t);
+    this.tool.handleDown(x, y, t);
   }
 
   /**
@@ -39,7 +38,7 @@ export class InputController {
   handleMove(x: number, y: number, t: number): void {
     if (this.locked) return;
 
-    this.strokeSystem.handleMove(x, y, t);
+    this.tool.handleMove(x, y, t);
     this.tiltController.setPointerTarget(x, y);
   }
 
@@ -54,7 +53,7 @@ export class InputController {
 
     this.inputActive = false;
     this.tiltController.endInteraction();
-    this.strokeSystem.handleUp(x, y, t);
+    this.tool.handleUp(x, y, t);
   }
 
   /**
@@ -63,10 +62,10 @@ export class InputController {
   lock(): void {
     this.locked = true;
     if (this.inputActive) {
-      // Force end any active stroke.
+      // Force end any active interaction.
       this.inputActive = false;
       this.tiltController.endInteraction();
-      this.strokeSystem.setActive(false);
+      this.tool.deactivate();
     }
   }
 
