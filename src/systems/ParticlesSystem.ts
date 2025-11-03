@@ -112,6 +112,11 @@ export class ParticlesSystem {
     }
   }
 
+  // Get total active particle count for debug display.
+  getActiveCount(): number {
+    return this.waterActiveCount + this.dirtActiveCount;
+  }
+
   // Spawn water particles (always from cursor when cleaning).
   spawnWater(
     x: number,
