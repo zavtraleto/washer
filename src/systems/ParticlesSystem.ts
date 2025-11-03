@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { MathUtils } from '../utils/MathUtils';
 
 const TEXTURE_KEY = 'particle_circle';
 const DEBUG_PARTICLES = true; // Enable to see particle spawn counts.
@@ -315,7 +316,7 @@ export class ParticlesSystem {
     }
 
     const normalized = this.normalizeDirection(dirX, dirY);
-    const clampedIntensity = Phaser.Math.Clamp(intensity, 0.3, 1.5);
+    const clampedIntensity = MathUtils.clamp(intensity, 0.3, 1.5);
     const desired = Math.round(
       config.baseBurst + clampedIntensity * config.burstScale,
     );

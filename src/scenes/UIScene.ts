@@ -1,4 +1,7 @@
 import Phaser from 'phaser';
+import { MathUtils } from '../utils/MathUtils';
+import { eventBus } from '../services/EventBus';
+import { GameEvents } from '../types/events';
 
 const TOP_PADDING = 24;
 const BAR_PADDING = 12;
@@ -32,10 +35,10 @@ export default class UIScene extends Phaser.Scene {
     this.layout();
     this.drawBar();
     this.createButtons();
-    this.game.events.on('PROGRESS', this.handleProgress, this); // Listen for clean percent updates.
-    this.game.events.on('WIN', this.handleWin, this); // Reveal Next button on win.
-    this.game.events.on('RESTART', this.handleReset, this);
-    this.game.events.on('NEXT', this.handleReset, this);
+    eventBus.on(GameEvents.PROGRESS, this.handleProgress, this); // Listen for clean percent updates.
+    eventBus.on(GameEvents.WIN, this.handleWin, this); // Reveal Next button on win.
+    eventBus.on(GameEvents.RESTART, this.handleReset, this);
+    eventBus.on(GameEvents.NEXT, this.handleReset, this);
     this.scale.on('resize', this.handleResize, this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.onShutdown, this);
   }
@@ -47,7 +50,7 @@ export default class UIScene extends Phaser.Scene {
   }
 
   private handleProgress(percent: number): void {
-    this.target = Phaser.Math.Clamp(percent, 0, 100);
+    this.target = MathUtils.clamp(percent, 0, 100);
   }
 
   private layout(): void {
@@ -69,7 +72,7 @@ export default class UIScene extends Phaser.Scene {
     this.bar.clear();
     this.bar.fillStyle(0x1e1f24, 0.65);
     this.bar.fillRoundedRect(0, 0, this.barWidth, BAR_HEIGHT, 4);
-    const fillWidth = this.barWidth * Phaser.Math.Clamp(this.value / 100, 0, 1);
+    const fillWidth = this.barWidth * MathUtils.clamp(this.value / 100, 0, 1);
     this.bar.fillStyle(0x61d5ff, 0.9);
     this.bar.fillRoundedRect(0, 0, fillWidth, BAR_HEIGHT, 4);
   }
@@ -86,7 +89,7 @@ export default class UIScene extends Phaser.Scene {
       .setOrigin(1, 0)
       .setInteractive({ useHandCursor: true });
     this.btnRestart.on('pointerup', () => {
-      this.game.events.emit('RESTART'); // what: restart requested by player.
+      eventBus.emit(GameEvents.RESTART); // what: restart requested by player.
     });
 
     this.btnNext = this.add
@@ -95,7 +98,7 @@ export default class UIScene extends Phaser.Scene {
       .setInteractive({ useHandCursor: true })
       .setVisible(false);
     this.btnNext.on('pointerup', () => {
-      this.game.events.emit('NEXT'); // what: advance to new seed.
+      eventBus.emit(GameEvents.NEXT); // what: advance to new seed.
     });
   }
 
@@ -109,10 +112,10 @@ export default class UIScene extends Phaser.Scene {
   }
 
   private onShutdown(): void {
-    this.game.events.off('PROGRESS', this.handleProgress, this);
-    this.game.events.off('WIN', this.handleWin, this);
-    this.game.events.off('RESTART', this.handleReset, this);
-    this.game.events.off('NEXT', this.handleReset, this);
+    eventBus.off(GameEvents.PROGRESS, this.handleProgress);
+    eventBus.off(GameEvents.WIN, this.handleWin);
+    eventBus.off(GameEvents.RESTART, this.handleReset);
+    eventBus.off(GameEvents.NEXT, this.handleReset);
     this.scale.off('resize', this.handleResize, this);
   }
 }

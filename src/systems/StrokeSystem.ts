@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 
 import type { ToolConfig } from '../types/config';
 import { DirtSystem } from './DirtSystem';
+import { MathUtils } from '../utils/MathUtils';
 
 // Turn drag path into evenly spaced stamps with soft falloff.
 export class StrokeSystem {
@@ -74,7 +75,7 @@ export class StrokeSystem {
     ) {
       const needed = spacing - this.residual;
       travelledAlongSegment += needed;
-      const ratio = Phaser.Math.Clamp(travelledAlongSegment / dist, 0, 1);
+      const ratio = MathUtils.clamp(travelledAlongSegment / dist, 0, 1);
       const sx = Phaser.Math.Linear(this.lastX, x, ratio);
       const sy = Phaser.Math.Linear(this.lastY, y, ratio);
       const stampDt = dt * (needed / Math.max(dist, spacing));
@@ -142,7 +143,7 @@ export class StrokeSystem {
       const normalized = this.normalizeDirection(dirX, dirY);
       const spacing = Math.max(1, this.tool.spacing);
       const travel = distance > 0 ? distance : spacing * 0.6;
-      const intensity = Phaser.Math.Clamp(travel / spacing, 0.4, 1.4);
+      const intensity = MathUtils.clamp(travel / spacing, 0.4, 1.4);
       this.onStamp(x, y, normalized.x, normalized.y, intensity);
     }
   }
@@ -159,7 +160,7 @@ export class StrokeSystem {
       return 1;
     }
     const speed = (distance / dtMs) * 1000; // px per second.
-    const normalized = Phaser.Math.Clamp(speed / 600, 0, 1);
+    const normalized = MathUtils.clamp(speed / 600, 0, 1);
     return 1 + 0.15 * normalized; // why: modest radius boost at higher pointer speed.
   }
 

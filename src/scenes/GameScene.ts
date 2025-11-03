@@ -6,10 +6,13 @@ import { DirtSystem } from '../systems/DirtSystem';
 import { DirtTextureRenderer } from '../systems/DirtTextureRenderer';
 import { ParticlesSystem } from '../systems/ParticlesSystem';
 import { DebugOverlay } from '../systems/DebugOverlay';
+import { TiltController } from '../systems/TiltController';
 import { RNG } from '../services/RNG';
 import { InputService } from '../services/InputService';
 import { StrokeSystem } from '../systems/StrokeSystem';
 import { MathUtils } from '../utils/MathUtils';
+import { eventBus } from '../services/EventBus';
+import { GameEvents } from '../types/events';
 import type { DirtLayerId } from '../types/config';
 import { OBJECT_TEXTURE_KEY } from './PreloadScene';
 
@@ -47,19 +50,12 @@ export default class GameScene extends Phaser.Scene {
   private stroke!: StrokeSystem; // Turns drag path into stamps.
   private particles!: ParticlesSystem; // Ballistic spray particle pool.
   private debugOverlay!: DebugOverlay; // Visual debug display.
+  private tiltController!: TiltController; // Mesh tilt with spring physics.
   private overlayDirty = false; // Track texture refresh requests.
   private won = false; // Prevent double-win triggers.
   private seed = Math.max(1, Date.now() & 0xffff); // Current level seed.
+  private inputActive = false; // Track if pointer is currently pressed.
   private readonly maxBoxRatio = 0.85; // Portion of screen reserved for the object (increased for larger mesh).
-
-  // Spring physics state for mesh tilt.
-  private currentTiltX = 0; // Current tilt rotation X in radians.
-  private currentTiltY = 0; // Current tilt rotation Y in radians.
-  private targetTiltX = 0; // Target tilt rotation X based on cursor position.
-  private targetTiltY = 0; // Target tilt rotation Y based on cursor position.
-  private tiltVelX = 0; // Spring velocity X for smooth return.
-  private tiltVelY = 0; // Spring velocity Y for smooth return.
-  private isInteracting = false; // Track if pointer is currently down.
 
   private readonly handleResize = () => {
     this.layoutObject();
@@ -94,6 +90,9 @@ export default class GameScene extends Phaser.Scene {
     this.debugOverlay = new DebugOverlay(this);
     this.debugOverlay.setMesh(this.mesh, () => this.getMeshVisualBounds());
 
+    // Create tilt controller for mesh spring physics.
+    this.tiltController = new TiltController(this.mesh, SPRING_CONFIG);
+
     this.silhouette = new SilhouetteClip(
       this,
       this.objKey,
@@ -118,15 +117,15 @@ export default class GameScene extends Phaser.Scene {
       callback: () => {
         const unionRatio = this.dirt.getUnionDirtyRatio();
         const cleanPercent = (1 - unionRatio) * 100;
-        this.game.events.emit('PROGRESS', cleanPercent); // Emit clean percent to UI; UI lerps for smooth feel.
+        eventBus.emit(GameEvents.PROGRESS, cleanPercent); // Emit clean percent to UI; UI lerps for smooth feel.
         if (!this.won && cleanPercent >= 95) {
           this.handleWin(cleanPercent);
         }
       },
     }); // Update at ~5 Hz to keep CPU/GPU cost low.
 
-    this.game.events.on('RESTART', this.handleRestart, this);
-    this.game.events.on('NEXT', this.handleNext, this);
+    eventBus.on(GameEvents.RESTART, this.handleRestart, this);
+    eventBus.on(GameEvents.NEXT, this.handleNext, this);
 
     this.inputSvc = new InputService(this); // Normalize pointer events into world-space samples.
     this.stroke = new StrokeSystem(
@@ -153,7 +152,8 @@ export default class GameScene extends Phaser.Scene {
       if (this.won) {
         return; // why: lock input after win.
       }
-      this.isInteracting = true;
+      this.inputActive = true;
+      this.tiltController.startInteraction();
       this.stroke.setActive(true);
       this.stroke.handleDown(p.x, p.y, p.t);
     });
@@ -163,18 +163,15 @@ export default class GameScene extends Phaser.Scene {
       }
       this.stroke.handleMove(p.x, p.y, p.t);
 
-      // Update tilt target based on pointer position relative to mesh center.
-      if (this.isInteracting) {
-        this.updateTiltTarget(p.x, p.y);
-      }
+      // Update tilt target based on pointer position.
+      this.tiltController.setPointerTarget(p.x, p.y);
     });
     this.inputSvc.onUp((p) => {
       if (this.won) {
         return;
       }
-      this.isInteracting = false;
-      this.targetTiltX = 0;
-      this.targetTiltY = 0;
+      this.inputActive = false;
+      this.tiltController.endInteraction();
       this.stroke.handleUp(p.x, p.y, p.t);
     });
 
@@ -362,17 +359,18 @@ export default class GameScene extends Phaser.Scene {
     return { x, y }; // Convert UV back to screen coords using actual visual bounds.
   }
   public override update(_time: number, delta: number): void {
-    // Apply spring physics to mesh tilt.
-    this.updateSpringPhysics(delta / 1000);
+    // Update tilt controller.
+    this.tiltController.update(delta / 1000);
 
     // Update debug overlay with current stats.
     const unionRatio = this.dirt.getUnionDirtyRatio();
     const cleanPercent = (1 - unionRatio) * 100;
+    const tilt = this.tiltController.getTiltDegrees();
     this.debugOverlay.updateStats({
       dirtProgress: cleanPercent,
-      inputActive: this.isInteracting,
-      tiltX: Phaser.Math.RadToDeg(this.currentTiltX),
-      tiltY: Phaser.Math.RadToDeg(this.currentTiltY),
+      inputActive: this.inputActive,
+      tiltX: tilt.x,
+      tiltY: tilt.y,
       particleCount: this.particles.getActiveCount(),
       seed: this.seed,
     });
@@ -396,83 +394,8 @@ export default class GameScene extends Phaser.Scene {
     }
   }
 
-  private updateTiltTarget(pointerX: number, pointerY: number): void {
-    if (!this.mesh) {
-      return;
-    }
-
-    // Calculate normalized offset from mesh center (-1..1).
-    const dx = (pointerX - this.mesh.x) / (this.mesh.displayWidth * 0.5);
-    const dy = (pointerY - this.mesh.y) / (this.mesh.displayHeight * 0.5);
-
-    // Clamp to prevent extreme tilts at edges.
-    const clampedDx = Phaser.Math.Clamp(dx, -1, 1);
-    const clampedDy = Phaser.Math.Clamp(dy, -1, 1);
-
-    // Convert to radians with max tilt limit.
-    const maxTiltRad = Phaser.Math.DegToRad(SPRING_CONFIG.maxTiltDegrees);
-    this.targetTiltY = -clampedDx * maxTiltRad; // Y rotation for horizontal cursor movement.
-    this.targetTiltX = -clampedDy * maxTiltRad; // X rotation for vertical cursor movement.
-  }
-
-  private updateSpringPhysics(dtSeconds: number): void {
-    if (!this.mesh || dtSeconds <= 0) {
-      return;
-    }
-
-    // Lerp toward target when interacting.
-    if (this.isInteracting) {
-      this.currentTiltX = Phaser.Math.Linear(
-        this.currentTiltX,
-        this.targetTiltX,
-        SPRING_CONFIG.tiltSpeed,
-      );
-      this.currentTiltY = Phaser.Math.Linear(
-        this.currentTiltY,
-        this.targetTiltY,
-        SPRING_CONFIG.tiltSpeed,
-      );
-    } else {
-      // Spring back to center when not interacting.
-      const errorX = -this.currentTiltX;
-      const errorY = -this.currentTiltY;
-
-      // Apply spring force.
-      this.tiltVelX += errorX * SPRING_CONFIG.stiffness;
-      this.tiltVelY += errorY * SPRING_CONFIG.stiffness;
-
-      // Apply damping.
-      this.tiltVelX *= SPRING_CONFIG.damping;
-      this.tiltVelY *= SPRING_CONFIG.damping;
-
-      // Update positions.
-      this.currentTiltX += this.tiltVelX;
-      this.currentTiltY += this.tiltVelY;
-
-      // Stop when close enough to avoid jitter.
-      if (
-        Math.abs(this.currentTiltX) < 0.001 &&
-        Math.abs(this.tiltVelX) < 0.001
-      ) {
-        this.currentTiltX = 0;
-        this.tiltVelX = 0;
-      }
-      if (
-        Math.abs(this.currentTiltY) < 0.001 &&
-        Math.abs(this.tiltVelY) < 0.001
-      ) {
-        this.currentTiltY = 0;
-        this.tiltVelY = 0;
-      }
-    }
-
-    // Apply rotation to mesh.
-    this.mesh.modelRotation.x = this.currentTiltX;
-    this.mesh.modelRotation.y = this.currentTiltY;
-  }
-
   private clampUV(value: number): number {
-    return Phaser.Math.Clamp(value, UV_EPSILON, 1 - UV_EPSILON); // Clamp UV with a tiny epsilon for stability.
+    return MathUtils.clamp(value, UV_EPSILON, 1 - UV_EPSILON); // Clamp UV with a tiny epsilon for stability.
   }
 
   private handleWin(_cleanPercent: number): void {
@@ -480,7 +403,7 @@ export default class GameScene extends Phaser.Scene {
     if (this.stroke) {
       this.stroke.setActive(false); // Lock input when win condition met.
     }
-    this.game.events.emit('WIN');
+    eventBus.emit(GameEvents.WIN);
   }
 
   private handleRestart(): void {
@@ -501,7 +424,7 @@ export default class GameScene extends Phaser.Scene {
     const { map0, map1 } = this.dirt.getMapsForShader();
     this.dirtRenderer.updateTexture(map0, map1);
     const cleanPercent = (1 - this.dirt.getUnionDirtyRatio()) * 100;
-    this.game.events.emit('PROGRESS', cleanPercent);
+    eventBus.emit(GameEvents.PROGRESS, cleanPercent);
     this.overlayDirty = false;
     this.won = false;
     if (this.stroke) {
@@ -518,8 +441,8 @@ export default class GameScene extends Phaser.Scene {
     if (this.stroke) {
       this.stroke.setActive(false);
     }
-    this.game.events.off('RESTART', this.handleRestart, this);
-    this.game.events.off('NEXT', this.handleNext, this);
+    eventBus.off(GameEvents.RESTART, this.handleRestart);
+    eventBus.off(GameEvents.NEXT, this.handleNext);
     this.inputSvc.destroy();
     this.dirtRenderer.destroy();
     this.particles.destroy();
