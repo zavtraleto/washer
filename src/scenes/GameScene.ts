@@ -13,6 +13,9 @@ import { StrokeSystem } from '../systems/StrokeSystem';
 import { MathUtils } from '../utils/MathUtils';
 import { eventBus } from '../services/EventBus';
 import { GameEvents } from '../types/events';
+import { InputController } from '../systems/InputController';
+import { GameContext } from '../services/GameContext';
+import { GameEventDispatcher } from '../services/GameEventDispatcher';
 import type { DirtLayerId } from '../types/config';
 import { OBJECT_TEXTURE_KEY } from './PreloadScene';
 
@@ -51,10 +54,10 @@ export default class GameScene extends Phaser.Scene {
   private particles!: ParticlesSystem; // Ballistic spray particle pool.
   private debugOverlay!: DebugOverlay; // Visual debug display.
   private tiltController!: TiltController; // Mesh tilt with spring physics.
+  private inputController!: InputController; // Coordinates input with tilt + stroke systems.
+  private gameContext!: GameContext; // Centralized game state (seed, coverage, win status).
+  private gameplayEvents!: GameEventDispatcher; // Event dispatcher for gameplay events (stamp, dirt cleared, etc.).
   private overlayDirty = false; // Track texture refresh requests.
-  private won = false; // Prevent double-win triggers.
-  private seed = Math.max(1, Date.now() & 0xffff); // Current level seed.
-  private inputActive = false; // Track if pointer is currently pressed.
   private readonly maxBoxRatio = 0.85; // Portion of screen reserved for the object (increased for larger mesh).
 
   private readonly handleResize = () => {
@@ -75,6 +78,13 @@ export default class GameScene extends Phaser.Scene {
     if (this.objKey !== object.id) {
       this.objKey = object.id; // Fallback if catalog key changes.
     }
+
+    // Initialize GameContext with initial seed and coverage.
+    const initialSeed = Math.max(1, Date.now() & 0xffff);
+    this.gameContext = new GameContext(initialSeed, DEFAULT_COVERAGE);
+
+    // Initialize gameplay event dispatcher for within-scene events.
+    this.gameplayEvents = new GameEventDispatcher(eventBus);
 
     // Create mesh as the main cleanable object.
     this.mesh = this.add.mesh(0, 0, this.objKey);
@@ -108,8 +118,7 @@ export default class GameScene extends Phaser.Scene {
       this.objKey,
       DIRT_RENDER_CONFIG,
     );
-    this.particles = new ParticlesSystem(this, this.mesh);
-    this.reinitLevel(false); // what: seed dirt maps and overlay for first run.
+    this.particles = new ParticlesSystem(this, this.mesh, this.gameplayEvents);
 
     this.progressTimer = this.time.addEvent({
       delay: 200,
@@ -118,7 +127,7 @@ export default class GameScene extends Phaser.Scene {
         const unionRatio = this.dirt.getUnionDirtyRatio();
         const cleanPercent = (1 - unionRatio) * 100;
         eventBus.emit(GameEvents.PROGRESS, cleanPercent); // Emit clean percent to UI; UI lerps for smooth feel.
-        if (!this.won && cleanPercent >= 95) {
+        if (!this.gameContext.isWon() && cleanPercent >= 95) {
           this.handleWin(cleanPercent);
         }
       },
@@ -133,46 +142,35 @@ export default class GameScene extends Phaser.Scene {
       catalog.tool,
       this.dirt,
       (wx, wy) => this.worldToLocal(wx, wy),
-      (sx, sy, dirX, dirY, intensity) => {
-        // Always spawn water particles at cursor position (cleaning spray).
-        this.particles.spawnWater(sx, sy, dirX, dirY, intensity);
-
-        // Check if we're hitting a dirty area and spawn dirt particles.
-        const { u, v } = this.worldToLocal(sx, sy);
-        const dirtValue = this.dirt.getUnionDirtyValueAt(u, v);
-
-        if (dirtValue > 0.05) {
-          // Spawn dirt even on lightly dirty areas
-          const dirtIntensity = Math.min(intensity * (dirtValue + 0.5), 2.0);
-          this.particles.spawnDirt(sx, sy, dirX, dirY, dirtIntensity);
-        }
-      },
+      this.gameplayEvents,
     );
+
+    // Initialize InputController to coordinate tilt + stroke systems.
+    this.inputController = new InputController(
+      this.tiltController,
+      this.stroke,
+    );
+
+    // Initialize level AFTER all systems are ready.
+    this.reinitLevel(); // what: seed dirt maps and overlay for first run.
+
     this.inputSvc.onDown((p) => {
-      if (this.won) {
+      if (this.gameContext.isWon()) {
         return; // why: lock input after win.
       }
-      this.inputActive = true;
-      this.tiltController.startInteraction();
-      this.stroke.setActive(true);
-      this.stroke.handleDown(p.x, p.y, p.t);
+      this.inputController.handleDown(p.x, p.y, p.t);
     });
     this.inputSvc.onMove((p) => {
-      if (this.won) {
+      if (this.gameContext.isWon()) {
         return;
       }
-      this.stroke.handleMove(p.x, p.y, p.t);
-
-      // Update tilt target based on pointer position.
-      this.tiltController.setPointerTarget(p.x, p.y);
+      this.inputController.handleMove(p.x, p.y, p.t);
     });
     this.inputSvc.onUp((p) => {
-      if (this.won) {
+      if (this.gameContext.isWon()) {
         return;
       }
-      this.inputActive = false;
-      this.tiltController.endInteraction();
-      this.stroke.handleUp(p.x, p.y, p.t);
+      this.inputController.handleUp(p.x, p.y, p.t);
     });
 
     this.layoutObject();
@@ -368,11 +366,11 @@ export default class GameScene extends Phaser.Scene {
     const tilt = this.tiltController.getTiltDegrees();
     this.debugOverlay.updateStats({
       dirtProgress: cleanPercent,
-      inputActive: this.inputActive,
+      inputActive: this.inputController.isActive(),
       tiltX: tilt.x,
       tiltY: tilt.y,
       particleCount: this.particles.getActiveCount(),
-      seed: this.seed,
+      seed: this.gameContext.getSeed(),
     });
     this.debugOverlay.update();
 
@@ -399,37 +397,32 @@ export default class GameScene extends Phaser.Scene {
   }
 
   private handleWin(_cleanPercent: number): void {
-    this.won = true;
-    if (this.stroke) {
-      this.stroke.setActive(false); // Lock input when win condition met.
-    }
+    this.gameContext.setWon();
+    this.inputController.lock(); // Lock input when win condition met.
     eventBus.emit(GameEvents.WIN);
   }
 
   private handleRestart(): void {
-    this.reinitLevel(false); // what: reset with current seed for repeatability.
+    this.gameContext.reset(); // Reset state to 'playing' with current seed.
+    this.reinitLevel(); // what: reset with current seed for repeatability.
   }
 
   private handleNext(): void {
-    this.reinitLevel(true); // what: reseed for a fresh layout.
+    this.gameContext.nextLevel(); // Generate new seed and reset state.
+    this.reinitLevel(); // what: derive new seed and recreate dirt layout.
   }
 
-  private reinitLevel(reseed: boolean): void {
-    if (reseed) {
-      const randomOffset = Phaser.Math.Between(1, 0xffff);
-      this.seed = Math.max(1, (Date.now() & 0xffff) ^ randomOffset); // why: derive new seed while avoiding zero.
-    }
-    this.rng = new RNG(this.seed);
-    this.dirt.init(this.rng, DEFAULT_COVERAGE);
+  private reinitLevel(): void {
+    // Note: seed management now handled by GameContext in handleRestart/handleNext.
+    // This method just uses the current seed from context.
+    this.rng = new RNG(this.gameContext.getSeed());
+    this.dirt.init(this.rng, this.gameContext.getCoverage());
     const { map0, map1 } = this.dirt.getMapsForShader();
     this.dirtRenderer.updateTexture(map0, map1);
     const cleanPercent = (1 - this.dirt.getUnionDirtyRatio()) * 100;
     eventBus.emit(GameEvents.PROGRESS, cleanPercent);
     this.overlayDirty = false;
-    this.won = false;
-    if (this.stroke) {
-      this.stroke.setActive(false); // why: wait for next press after reset.
-    }
+    this.inputController.unlock(); // Unlock input after reset for new round.
     if (this.particles) {
       this.particles.clear();
     }

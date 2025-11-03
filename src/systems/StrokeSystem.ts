@@ -3,6 +3,7 @@ import Phaser from 'phaser';
 import type { ToolConfig } from '../types/config';
 import { DirtSystem } from './DirtSystem';
 import { MathUtils } from '../utils/MathUtils';
+import type { GameEventDispatcher } from '../services/GameEventDispatcher';
 
 // Turn drag path into evenly spaced stamps with soft falloff.
 export class StrokeSystem {
@@ -24,13 +25,7 @@ export class StrokeSystem {
       x: number,
       y: number,
     ) => { u: number; v: number },
-    private readonly onStamp?: (
-      x: number,
-      y: number,
-      dirX: number,
-      dirY: number,
-      intensity: number,
-    ) => void,
+    private readonly eventDispatcher: GameEventDispatcher,
   ) {
     this.rng = new Phaser.Math.RandomDataGenerator([scene.time.now.toString()]);
   }
@@ -139,13 +134,21 @@ export class StrokeSystem {
     this.dirt.applyStampUV(u, v, this.tool.strength, radiusFactor);
     this.stamped = true;
 
-    if (this.onStamp) {
-      const normalized = this.normalizeDirection(dirX, dirY);
-      const spacing = Math.max(1, this.tool.spacing);
-      const travel = distance > 0 ? distance : spacing * 0.6;
-      const intensity = MathUtils.clamp(travel / spacing, 0.4, 1.4);
-      this.onStamp(x, y, normalized.x, normalized.y, intensity);
-    }
+    // Emit STAMP_APPLIED event for other systems (e.g., particles) to react.
+    const normalized = this.normalizeDirection(dirX, dirY);
+    const spacing = Math.max(1, this.tool.spacing);
+    const travel = distance > 0 ? distance : spacing * 0.6;
+    const intensity = MathUtils.clamp(travel / spacing, 0.4, 1.4);
+    const dirtValue = this.dirt.getUnionDirtyValueAt(u, v);
+
+    this.eventDispatcher.emitStampApplied({
+      worldX: x,
+      worldY: y,
+      dirX: normalized.x,
+      dirY: normalized.y,
+      intensity,
+      dirtValue,
+    });
   }
 
   private computeJitter(): number {

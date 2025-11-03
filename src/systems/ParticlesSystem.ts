@@ -1,5 +1,7 @@
 import Phaser from 'phaser';
 import { MathUtils } from '../utils/MathUtils';
+import type { GameEventDispatcher } from '../services/GameEventDispatcher';
+import type { StampAppliedPayload } from '../types/events';
 
 const TEXTURE_KEY = 'particle_circle';
 const DEBUG_PARTICLES = true; // Enable to see particle spawn counts.
@@ -97,6 +99,7 @@ export class ParticlesSystem {
   constructor(
     private readonly scene: Phaser.Scene,
     private readonly objectMesh: Phaser.GameObjects.Mesh,
+    private readonly eventDispatcher: GameEventDispatcher,
   ) {
     this.ensureTexture();
     this.depth = this.objectMesh.depth + 1;
@@ -110,6 +113,25 @@ export class ParticlesSystem {
     // Create dirt particle pool.
     for (let i = 0; i < DIRT_CONFIG.maxParticles; i += 1) {
       this.dirtParticles.push(this.createParticle(objectMesh.x, objectMesh.y));
+    }
+
+    // Listen for STAMP_APPLIED events to spawn particles.
+    this.eventDispatcher.onStampApplied(this.handleStampApplied, this);
+  }
+
+  /**
+   * Handle STAMP_APPLIED event - spawn particles based on stamp details.
+   */
+  private handleStampApplied(payload: StampAppliedPayload): void {
+    const { worldX, worldY, dirX, dirY, intensity, dirtValue } = payload;
+
+    // Always spawn water particles at cursor position (cleaning spray).
+    this.spawnWater(worldX, worldY, dirX, dirY, intensity);
+
+    // Spawn dirt particles if hitting dirty area.
+    if (dirtValue > 0.05) {
+      const dirtIntensity = Math.min(intensity * (dirtValue + 0.5), 2.0);
+      this.spawnDirt(worldX, worldY, dirX, dirY, dirtIntensity);
     }
   }
 
@@ -255,6 +277,9 @@ export class ParticlesSystem {
   }
 
   destroy(): void {
+    // Unsubscribe from events.
+    this.eventDispatcher.offStampApplied(this.handleStampApplied);
+
     this.clear();
     const allParticles = [...this.waterParticles, ...this.dirtParticles];
     for (const particle of allParticles) {
