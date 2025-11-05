@@ -99,6 +99,13 @@ export class DirtSystem {
     }; // Stable hook for future shader pipelines.
   }
 
+  // what: instantly wipe all dirt maps to 0 (used for win state final cleanup).
+  clearAll(): void {
+    for (const map of this.maps.values()) {
+      map.fill(0);
+    }
+  }
+
   // what: reduce coverage around UV center using soft falloff per layer.
   applyStampUV(
     u: number,

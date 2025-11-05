@@ -8,6 +8,7 @@ import { ParticlesSystem } from '../systems/ParticlesSystem';
 import { DebugOverlay } from '../systems/DebugOverlay';
 import { TiltController } from '../systems/TiltController';
 import { ToolManager } from '../systems/ToolManager';
+import { WinEffectController } from '../systems/WinEffectController';
 import { RNG } from '../services/RNG';
 import { InputService } from '../services/InputService';
 import { MathUtils } from '../utils/MathUtils';
@@ -44,6 +45,11 @@ const DIRT_RENDER_CONFIG = {
   darkenFactor: 0.6, // 60% darkening on dirty areas.
 };
 
+// Win state config.
+const WIN_THRESHOLD = 0.95; // Clean percentage required to trigger win (95%).
+const WIN_BLINK_DURATION_MS = 500; // Duration of white flash effect.
+const WIN_BLINK_COLOR = 0xffffff; // White tint color for blink effect.
+
 export default class GameScene extends Phaser.Scene {
   private mesh!: Phaser.GameObjects.Mesh; // Main 3D mesh object for cleaning interaction.
   private objKey!: string; // Texture key tied to the catalog asset for reuse.
@@ -62,6 +68,7 @@ export default class GameScene extends Phaser.Scene {
   private inputController!: InputController; // Coordinates input with tilt + stroke systems.
   private gameContext!: GameContext; // Centralized game state (seed, coverage, win status).
   private gameplayEvents!: GameEventDispatcher; // Event dispatcher for gameplay events (stamp, dirt cleared, etc.).
+  private winEffect!: WinEffectController; // Visual win effect (white flash tint).
   private overlayDirty = false; // Track texture refresh requests.
   private readonly maxBoxRatio = 0.85; // Portion of screen reserved for the object (increased for larger mesh).
 
@@ -108,6 +115,14 @@ export default class GameScene extends Phaser.Scene {
     // Create tilt controller for mesh spring physics.
     this.tiltController = new TiltController(this.mesh, SPRING_CONFIG);
 
+    // Create win effect controller for final cleanup animation.
+    this.winEffect = new WinEffectController(
+      this,
+      this.mesh,
+      WIN_BLINK_DURATION_MS,
+      WIN_BLINK_COLOR,
+    );
+
     this.silhouette = new SilhouetteClip(
       this,
       this.objKey,
@@ -132,7 +147,7 @@ export default class GameScene extends Phaser.Scene {
         const unionRatio = this.dirt.getUnionDirtyRatio();
         const cleanPercent = (1 - unionRatio) * 100;
         eventBus.emit(GameEvents.PROGRESS, cleanPercent); // Emit clean percent to UI; UI lerps for smooth feel.
-        if (!this.gameContext.isWon() && cleanPercent >= 95) {
+        if (!this.gameContext.isWon() && cleanPercent >= WIN_THRESHOLD * 100) {
           this.handleWin(cleanPercent);
         }
       },
@@ -495,7 +510,19 @@ export default class GameScene extends Phaser.Scene {
   private handleWin(_cleanPercent: number): void {
     this.gameContext.setWon();
     this.inputController.lock(); // Lock input when win condition met.
-    eventBus.emit(GameEvents.WIN);
+
+    // Instantly wipe remaining dirt (final 5%).
+    this.dirt.clearAll();
+    const { map0, map1 } = this.dirt.getMapsForShader();
+    this.dirtRenderer.updateTexture(map0, map1);
+
+    // Clear all active particles for clean win moment.
+    this.particles.clear();
+
+    // Play white flash effect; emit WIN event after blink completes.
+    this.winEffect.play(() => {
+      eventBus.emit(GameEvents.WIN);
+    });
   }
 
   private handleRestart(): void {
