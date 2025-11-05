@@ -20,14 +20,14 @@ export function getCatalog(): Catalog {
         debugColor: 0x8a5a2b,
       },
     ],
-    tool: {
-      id: 'water_jet',
-      spacing: 10,
-      falloff: 'soft',
-      jitter: 0.08,
-      strength: 1.0,
-      speedBoost: true,
-    },
+    // tool: {
+    //   id: 'water_jet',
+    //   spacing: 10,
+    //   falloff: 'soft',
+    //   jitter: 0.08,
+    //   strength: 1.0,
+    //   speedBoost: true,
+    // },
     tools: {
       scrubber: {
         id: 'scrubber',
@@ -40,11 +40,16 @@ export function getCatalog(): Catalog {
       powerwash: {
         id: 'powerwash',
         name: 'Power Wash',
-        maxRange: 500, // Max stream distance (px).
-        streamWidth: 20, // Stream visual width (for future rendering).
-        pressure: 1.5, // Higher erosion strength than scrubber.
-        tickRate: 20, // 20 stamps per second for continuous feel.
-        jitter: 0.12,
+        sourceAnchorX: 0.95,
+        sourceAnchorY: 0.95,
+        springStiffness: 0.08,
+        springDamping: 0.45,
+        pressureRiseSpeed: 4,
+        pressureFallSpeed: 2.5,
+        baseStrength: 8.0,
+        jitter: 0.1,
+        streamWidth: 8,
+        streamColor: 0x4da6ff,
       },
     },
   };

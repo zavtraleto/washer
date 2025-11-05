@@ -7,16 +7,6 @@ export interface DirtLayerConfig {
   debugColor?: number;
 }
 
-// Legacy tool config for scrubbing tool (backward compatibility).
-export interface ToolConfig {
-  id: 'water_jet';
-  spacing: number;
-  falloff: 'soft';
-  jitter: number;
-  strength: number;
-  speedBoost: boolean;
-}
-
 // Scrubbing tool config.
 export interface ScrubbingConfig {
   id: 'scrubber';
@@ -31,22 +21,26 @@ export interface ScrubbingConfig {
 export interface PowerWashConfig {
   id: 'powerwash';
   name: 'Power Wash';
-  maxRange: number;
-  streamWidth: number;
-  pressure: number;
-  tickRate: number;
+  sourceAnchorX: number;
+  sourceAnchorY: number;
+  springStiffness: number;
+  springDamping: number;
+  pressureRiseSpeed: number;
+  pressureFallSpeed: number;
+  baseStrength: number;
   jitter: number;
+  streamWidth: number;
+  streamColor: number;
 }
 
 export interface ObjectDef {
-  id: 'key_v1';
+  id: string;
   sprite: string;
 }
 
 export interface Catalog {
   object: ObjectDef;
   layers: DirtLayerConfig[];
-  tool: ToolConfig; // Legacy single tool (for backward compatibility).
   tools?: {
     // New multi-tool config.
     scrubber: ScrubbingConfig;

@@ -1,6 +1,6 @@
 /**
- * PowerWashTool — click & hold OUTSIDE object to fire continuous water stream TOWARD object.
- * Stream mechanics: visible blue line from click point to object edge, continuous erosion at impact point.
+ * PowerWashTool — water stream with inertia and damping.
+ * Stream starts from fixed corner, follows cursor with spring physics, washes where it hits object.
  */
 
 import Phaser from 'phaser';
@@ -9,33 +9,36 @@ import type { IToolConfig } from '../types/tools';
 import type { DirtSystem } from '../systems/DirtSystem';
 import type { GameEventDispatcher } from '../services/GameEventDispatcher';
 
-/** Configuration specific to power wash tool. */
 export interface PowerWashToolConfig extends IToolConfig {
-  maxRange: number; // Maximum stream distance (px).
-  streamWidth: number; // Stream visual width (px).
-  pressure: number; // Erosion strength per frame.
-  tickRate: number; // Erosion ticks per second.
-  jitter: number; // Random radius variation (0-1).
+  sourceAnchorX: number; // Corner position 0..1.
+  sourceAnchorY: number;
+  springStiffness: number; // Spring feel.
+  springDamping: number;
+  pressureRiseSpeed: number; // Ramp speed.
+  pressureFallSpeed: number;
+  baseStrength: number; // Cleaning power.
+  jitter: number;
+  streamWidth: number; // Visual.
+  streamColor: number;
 }
 
 export class PowerWashTool extends BaseTool {
   private dirtSystem: DirtSystem;
   private worldToUV: (x: number, y: number) => { u: number; v: number };
+  private isPointOnObject: (x: number, y: number) => boolean;
   private eventDispatcher: GameEventDispatcher;
-  private powerWashConfig: PowerWashToolConfig;
+  private cfg: PowerWashToolConfig;
 
-  private isStreaming = false;
-  private streamStartX = 0;
-  private streamStartY = 0;
-  private streamTargetX = 0;
-  private streamTargetY = 0;
-  private streamHitX = 0;
-  private streamHitY = 0;
-  private hasHit = false;
-  private timeSinceLastTick = 0;
+  private sourceX = 0;
+  private sourceY = 0;
+  private nozzleX = 0;
+  private nozzleY = 0;
+  private velX = 0;
+  private velY = 0;
+  private pressure = 0;
+  private firing = false;
 
-  // Visual stream line.
-  private streamLine: Phaser.GameObjects.Graphics;
+  private graphics: Phaser.GameObjects.Graphics;
 
   constructor(
     scene: Phaser.Scene,
@@ -46,205 +49,144 @@ export class PowerWashTool extends BaseTool {
     eventDispatcher: GameEventDispatcher,
   ) {
     super(config);
+    this.cfg = config;
     this.dirtSystem = dirtSystem;
     this.worldToUV = worldToUV;
-    this.eventDispatcher = eventDispatcher;
-    this.powerWashConfig = config;
     this.isPointOnObject = isPointOnObject;
+    this.eventDispatcher = eventDispatcher;
 
-    // Create stream line graphics.
-    this.streamLine = scene.add.graphics();
-    this.streamLine.setDepth(1000); // Render on top.
-    this.streamLine.setVisible(false);
+    this.graphics = scene.add.graphics().setDepth(1000);
+
+    // Fixed source at corner.
+    this.sourceX = scene.scale.width * config.sourceAnchorX;
+    this.sourceY = scene.scale.height * config.sourceAnchorY;
+    this.nozzleX = this.sourceX;
+    this.nozzleY = this.sourceY;
   }
-
-  // Callback to check if point is on object (injected from GameScene).
-  private isPointOnObject: (x: number, y: number) => boolean;
 
   override activate(): void {
     super.activate();
-    this.streamLine.setVisible(false);
+    this.graphics.setVisible(false);
   }
 
   override deactivate(): void {
     super.deactivate();
-    this.isStreaming = false;
-    this.streamLine.setVisible(false);
+    this.firing = false;
+    this.graphics.setVisible(false);
   }
 
-  handleDown(worldX: number, worldY: number, _timestamp: number): void {
+  handleDown(_worldX: number, _worldY: number, _timestamp: number): void {
     if (!this.active) return;
-
-    // Start streaming from click point.
-    this.isStreaming = true;
-    this.streamStartX = worldX;
-    this.streamStartY = worldY;
-    this.streamTargetX = worldX;
-    this.streamTargetY = worldY;
-    this.timeSinceLastTick = 0;
-    this.hasHit = false;
+    this.firing = true;
   }
 
-  handleMove(worldX: number, worldY: number, _timestamp: number): void {
-    if (!this.active || !this.isStreaming) return;
-
-    // Update stream target (allows player to aim stream while holding).
-    this.streamTargetX = worldX;
-    this.streamTargetY = worldY;
+  handleMove(_worldX: number, _worldY: number, _timestamp: number): void {
+    // Movement is tracked in update via pointer.
   }
 
   handleUp(_worldX: number, _worldY: number, _timestamp: number): void {
     if (!this.active) return;
-    this.isStreaming = false;
-    this.streamLine.setVisible(false);
-    this.hasHit = false;
+    this.firing = false;
   }
 
   update(deltaMs: number): void {
     if (!this.active) return;
 
-    if (this.isStreaming) {
-      // Find hit point on object edge.
-      this.updateStreamHitPoint();
+    const dt = deltaMs / 1000;
 
-      // Draw visual stream.
-      this.drawStream();
-
-      // Apply continuous erosion at hit point.
-      if (this.hasHit) {
-        this.timeSinceLastTick += deltaMs;
-        const tickInterval = 1000 / this.powerWashConfig.tickRate;
-
-        while (this.timeSinceLastTick >= tickInterval) {
-          this.applyErosionAtHitPoint();
-          this.timeSinceLastTick -= tickInterval;
-        }
-      }
+    // Update pressure.
+    if (this.firing) {
+      this.pressure = Math.min(
+        1,
+        this.pressure + this.cfg.pressureRiseSpeed * dt,
+      );
     } else {
-      this.streamLine.setVisible(false);
+      this.pressure = Math.max(
+        0,
+        this.pressure - this.cfg.pressureFallSpeed * dt,
+      );
     }
-  }
 
-  /**
-   * Find intersection point with object along ray from start to target.
-   */
-  private updateStreamHitPoint(): void {
-    const { maxRange } = this.powerWashConfig;
-
-    // Calculate ray direction from start to current target.
-    const dx = this.streamTargetX - this.streamStartX;
-    const dy = this.streamTargetY - this.streamStartY;
-    const distance = Math.sqrt(dx * dx + dy * dy);
-
-    if (distance < 1) {
-      this.hasHit = false;
+    if (this.pressure <= 0.01) {
+      this.graphics.setVisible(false);
       return;
     }
 
-    const dirX = dx / distance;
-    const dirY = dy / distance;
+    // Get cursor position.
+    const pointer = this.graphics.scene.input.activePointer;
+    const cursorX = pointer.worldX;
+    const cursorY = pointer.worldY;
 
-    // Sample along ray to find first intersection with object.
-    const stepSize = 3; // Sample every 3px for performance.
-    const maxSteps = Math.floor(Math.min(maxRange, distance) / stepSize);
-
-    for (let step = 1; step <= maxSteps; step += 1) {
-      const testX = this.streamStartX + dirX * stepSize * step;
-      const testY = this.streamStartY + dirY * stepSize * step;
-
-      if (this.isPointOnObject(testX, testY)) {
-        this.streamHitX = testX;
-        this.streamHitY = testY;
-        this.hasHit = true;
-        return;
-      }
-    }
-
-    this.hasHit = false;
-  }
-
-  /**
-   * Draw visible stream line from start to hit point.
-   */
-  private drawStream(): void {
-    this.streamLine.clear();
-
-    if (!this.hasHit) {
-      this.streamLine.setVisible(false);
+    // Check if cursor is on object - if yes, that's where we want to clean.
+    if (!this.isPointOnObject(cursorX, cursorY)) {
+      this.graphics.setVisible(false);
       return;
     }
 
-    this.streamLine.setVisible(true);
+    // Nozzle springs toward cursor position (with lag/inertia).
+    const dx = cursorX - this.nozzleX;
+    const dy = cursorY - this.nozzleY;
 
-    // Draw thick blue line for stream.
-    const { streamWidth } = this.powerWashConfig;
-    this.streamLine.lineStyle(streamWidth, 0x4da6ff, 0.7);
-    this.streamLine.beginPath();
-    this.streamLine.moveTo(this.streamStartX, this.streamStartY);
-    this.streamLine.lineTo(this.streamHitX, this.streamHitY);
-    this.streamLine.strokePath();
+    const forceX =
+      this.cfg.springStiffness * dx - this.cfg.springDamping * this.velX;
+    const forceY =
+      this.cfg.springStiffness * dy - this.cfg.springDamping * this.velY;
 
-    // Draw glow effect at impact point.
-    this.streamLine.fillStyle(0x6bb8ff, 0.4);
-    this.streamLine.fillCircle(
-      this.streamHitX,
-      this.streamHitY,
-      streamWidth * 1.5,
+    this.velX += forceX;
+    this.velY += forceY;
+    this.nozzleX += this.velX * dt * 60;
+    this.nozzleY += this.velY * dt * 60;
+
+    // Draw stream from source to nozzle (lagged cleaning point).
+    this.graphics.clear();
+    this.graphics.setVisible(true);
+    this.graphics.lineStyle(
+      this.cfg.streamWidth,
+      this.cfg.streamColor,
+      this.pressure * 0.7,
     );
-  }
+    this.graphics.beginPath();
+    this.graphics.moveTo(this.sourceX, this.sourceY);
+    this.graphics.lineTo(this.nozzleX, this.nozzleY);
+    this.graphics.strokePath();
 
-  /**
-   * Apply erosion at the current hit point.
-   */
-  private applyErosionAtHitPoint(): void {
-    if (!this.hasHit) return;
+    // Draw cleaning point indicator.
+    this.graphics.fillStyle(0xffffff, this.pressure * 0.5);
+    this.graphics.fillCircle(this.nozzleX, this.nozzleY, 8);
 
-    const { pressure, jitter } = this.powerWashConfig;
+    // Clean where nozzle is (lagged position with inertia).
+    const uv = this.worldToUV(this.nozzleX, this.nozzleY);
+    const jitterFactor = 1 + (Math.random() - 0.5) * this.cfg.jitter;
+    const strength = this.cfg.baseStrength * this.pressure;
 
-    const uv = this.worldToUV(this.streamHitX, this.streamHitY);
+    this.dirtSystem.applyStampUV(uv.u, uv.v, strength, jitterFactor);
+
+    // Emit particles at cleaning point.
     const dirtValue = this.dirtSystem.getUnionDirtyValueAt(uv.u, uv.v);
-
-    // Apply jitter to radius for organic feel.
-    const jitterAmount = 1 + (Math.random() - 0.5) * jitter;
-    const radiusFactor = Math.max(0.5, jitterAmount);
-
-    // Apply stamp to dirt system.
-    this.dirtSystem.applyStampUV(uv.u, uv.v, pressure, radiusFactor);
-
-    // Emit event for particle effects.
-    const dx = this.streamHitX - this.streamStartX;
-    const dy = this.streamHitY - this.streamStartY;
-    const dist = Math.sqrt(dx * dx + dy * dy);
-    const dirX = dist > 0 ? dx / dist : 0;
-    const dirY = dist > 0 ? dy / dist : 0;
+    const angle = Math.atan2(
+      this.nozzleY - this.sourceY,
+      this.nozzleX - this.sourceX,
+    );
 
     this.eventDispatcher.emitStampApplied({
-      worldX: this.streamHitX,
-      worldY: this.streamHitY,
-      dirX,
-      dirY,
-      intensity: pressure * 1.5, // Higher intensity for power wash splash.
+      worldX: this.nozzleX,
+      worldY: this.nozzleY,
+      dirX: Math.cos(angle),
+      dirY: Math.sin(angle),
+      intensity: this.pressure * 1.5,
       dirtValue,
     });
   }
 
-  /**
-   * Power wash tool only works OUTSIDE the object (click to aim stream).
-   */
   isValidInputLocation(
     _worldX: number,
     _worldY: number,
     isOnObject: boolean,
   ): boolean {
-    return !isOnObject; // Only allow starting stream from outside object.
+    return isOnObject;
   }
 
-  /**
-   * Cleanup when tool is destroyed.
-   */
   destroy(): void {
-    if (this.streamLine) {
-      this.streamLine.destroy();
-    }
+    this.graphics?.destroy();
   }
 }
