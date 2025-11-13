@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 
-import type { ToolConfig } from '../types/config';
+// import type { ToolConfig } from '../types/config';
 import { DirtSystem } from './DirtSystem';
 import { MathUtils } from '../utils/MathUtils';
 import type { GameEventDispatcher } from '../services/GameEventDispatcher';
@@ -21,7 +21,7 @@ export class StrokeSystem {
 
   constructor(
     scene: Phaser.Scene,
-    private readonly tool: ToolConfig,
+    private readonly tool: any, // ToolConfig
     private readonly dirt: DirtSystem,
     private readonly worldToUV: (
       x: number,
