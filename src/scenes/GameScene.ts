@@ -70,7 +70,6 @@ export default class GameScene extends Phaser.Scene {
   private gameplayEvents!: GameEventDispatcher; // Event dispatcher for gameplay events (stamp, dirt cleared, etc.).
   private winEffect!: WinEffectController; // Visual win effect (white flash tint).
   private overlayDirty = false; // Track texture refresh requests.
-  private readonly maxBoxRatio = 0.85; // Portion of screen reserved for the object (increased for larger mesh).
 
   private readonly handleResize = () => {
     this.layoutObject();
@@ -100,20 +99,29 @@ export default class GameScene extends Phaser.Scene {
 
     // Create mesh as the main cleanable object.
     this.mesh = this.add.mesh(0, 0, this.objKey);
+
     Phaser.Geom.Mesh.GenerateGridVerts({
       mesh: this.mesh,
       widthSegments: 8, // More vertices for smooth 3D deformation without warping.
+      heightSegments: 8,
       texture: this.objKey,
     });
     this.mesh.hideCCW = false;
-    this.mesh.panZ(1.5); // Moderate 3D perspective for visual depth.
+
+    // Use a square viewport for perspective to prevent aspect ratio distortion.
+    // This ensures perspective calculation doesn't stretch based on screen aspect.
+    const perspectiveSize = 1000; // Fixed square viewport for consistent projection.
+    this.mesh.setPerspective(perspectiveSize, perspectiveSize, 45);
+    this.mesh.panZ(1);
 
     // Create debug overlay for visual feedback.
     this.debugOverlay = new DebugOverlay(this);
     this.debugOverlay.setMesh(this.mesh, () => this.getMeshVisualBounds());
 
-    // Create tilt controller for mesh spring physics.
-    this.tiltController = new TiltController(this.mesh, SPRING_CONFIG);
+    // Create tilt controller for mesh spring physics (with bounds provider for accurate tilt).
+    this.tiltController = new TiltController(this.mesh, SPRING_CONFIG, () =>
+      this.getMeshVisualBounds(),
+    );
 
     // Create win effect controller for final cleanup animation.
     this.winEffect = new WinEffectController(
@@ -186,10 +194,10 @@ export default class GameScene extends Phaser.Scene {
     const scrubbingConfig = catalog.tools?.scrubber || {
       id: 'scrubber' as const,
       name: 'Scrubber' as const,
-      spacing: catalog.tool.spacing,
-      jitter: catalog.tool.jitter,
-      strength: catalog.tool.strength,
-      speedBoost: catalog.tool.speedBoost,
+      spacing: 10,
+      jitter: 0.08,
+      strength: 1.0,
+      speedBoost: true,
     };
 
     this.scrubbingTool = new ScrubbingTool(
@@ -261,42 +269,50 @@ export default class GameScene extends Phaser.Scene {
 
     const texWidth = texture.source[0].width;
     const texHeight = texture.source[0].height;
-    const shortest = Math.min(width, height);
-    const maxSize = shortest * this.maxBoxRatio;
-    const scale = Math.min(maxSize / texWidth, maxSize / texHeight);
+    const screenAspect = width / height;
 
-    // Apply 2x larger scale to make mesh more prominent.
-    const finalScale = scale * 2.0;
-    this.mesh.setScale(finalScale);
+    // Detect mobile portrait vs PC/landscape.
+    const isMobilePortrait = screenAspect < 0.75; // Narrower than 3:4 = portrait.
+
+    let scale: number;
+    if (isMobilePortrait) {
+      // Mobile portrait: fill most of vertical space, but don't exceed width.
+      const maxHeight = height * 0.85; // 85% of screen height.
+      const maxWidth = width * 0.95; // Don't exceed 95% of screen width.
+      const scaleByHeight = maxHeight / texHeight;
+      const scaleByWidth = maxWidth / texWidth;
+      scale = Math.min(scaleByHeight, scaleByWidth); // Use smaller to fit both constraints.
+    } else {
+      // PC/landscape: fill most of horizontal space, max 75% of width.
+      const maxWidth = width * 0.75; // Max 75% of screen width.
+      const maxHeight = height * 0.9; // Don't exceed 90% of screen height.
+      const scaleByWidth = maxWidth / texWidth;
+      const scaleByHeight = maxHeight / texHeight;
+      scale = Math.min(scaleByWidth, scaleByHeight); // Fit within both constraints.
+    }
+
+    // Apply uniform scale (maintains aspect ratio).
+    this.mesh.setScale(scale);
     this.mesh.setPosition(width * 0.5, height * 0.5);
 
     if (this.particles) {
       this.particles.relayout();
     }
   }
-
   public worldToLocal(x: number, y: number): { u: number; v: number } {
-    if (!this.mesh) {
-      return { u: 0.5, v: 0.5 }; // Default to center if object is missing.
-    }
-
-    // Get the actual projected bounds of the mesh vertices.
     const bounds = this.getMeshVisualBounds();
     if (!bounds) {
       return { u: 0.5, v: 0.5 };
     }
 
-    // Calculate UV based on actual visual bounds from projected vertices.
-    const localX = (x - bounds.left) / bounds.width;
-    const localY = (y - bounds.top) / bounds.height;
-
-    const uRaw = localX;
-    const vRaw = localY;
+    // Convert world position to UV using actual mesh bounds.
+    const u = (x - bounds.left) / bounds.width;
+    const v = (y - bounds.top) / bounds.height;
 
     return {
-      u: this.clampUV(uRaw),
-      v: this.clampUV(vRaw),
-    }; // Map screen coords to UV using actual projected vertex bounds.
+      u: this.clampUV(u),
+      v: this.clampUV(v),
+    };
   }
 
   private getMeshVisualBounds(): {
@@ -305,113 +321,40 @@ export default class GameScene extends Phaser.Scene {
     width: number;
     height: number;
   } | null {
-    if (!this.mesh) {
+    if (!this.mesh || !this.mesh.vertices || this.mesh.vertices.length === 0) {
       return null;
     }
 
-    // Get texture for validation.
-    const texture = this.mesh.texture;
-    if (!texture || !texture.source[0]) {
-      return null;
+    // Mesh vertices are in local space - need to transform to world space.
+    const matrix = this.mesh.getWorldTransformMatrix();
+    const verts = this.mesh.vertices;
+    let minX = Infinity,
+      minY = Infinity,
+      maxX = -Infinity,
+      maxY = -Infinity;
+
+    for (let i = 0; i < verts.length; i++) {
+      const v = verts[i];
+      if (!v) continue;
+
+      // Transform local vertex to world coordinates.
+      const worldX = v.vx * matrix.a + v.vy * matrix.c + matrix.e;
+      const worldY = v.vx * matrix.b + v.vy * matrix.d + matrix.f;
+
+      if (worldX < minX) minX = worldX;
+      if (worldX > maxX) maxX = worldX;
+      if (worldY < minY) minY = worldY;
+      if (worldY > maxY) maxY = worldY;
     }
-
-    const texWidth = texture.source[0].width;
-    const texHeight = texture.source[0].height;
-
-    // Strategy 1: Try to use projected vertex coordinates (vx, vy).
-    // These are populated during render, so may not be available immediately.
-    const faces = this.mesh.faces;
-
-    if (faces && faces.length > 0) {
-      let minX = Infinity;
-      let maxX = -Infinity;
-      let minY = Infinity;
-      let maxY = -Infinity;
-      let validVertexCount = 0;
-
-      // Get mesh world position to offset the local vertex coordinates.
-      const meshWorldX = this.mesh.x;
-      const meshWorldY = this.mesh.y;
-
-      // Iterate through all face vertices to find screen-space bounds.
-      for (let i = 0; i < faces.length; i += 1) {
-        const face = faces[i];
-        if (!face) {
-          continue;
-        }
-
-        // Each face has vertex1, vertex2, vertex3.
-        const vertices = [face.vertex1, face.vertex2, face.vertex3];
-
-        for (const vertex of vertices) {
-          if (!vertex) {
-            continue;
-          }
-
-          // Vertices have vx, vy which are in local/model space relative to mesh origin.
-          // We need to transform them to world/screen space by adding mesh position.
-          const localX = vertex.vx;
-          const localY = vertex.vy;
-
-          if (Number.isFinite(localX) && Number.isFinite(localY)) {
-            // Transform from local mesh space to world screen space.
-            const screenX = meshWorldX + localX;
-            const screenY = meshWorldY + localY;
-
-            minX = Math.min(minX, screenX);
-            maxX = Math.max(maxX, screenX);
-            minY = Math.min(minY, screenY);
-            maxY = Math.max(maxY, screenY);
-            validVertexCount += 1;
-          }
-        }
-      }
-
-      // If we got valid bounds from vertices, use them.
-      if (
-        validVertexCount > 3 &&
-        Number.isFinite(minX) &&
-        Number.isFinite(maxX) &&
-        Number.isFinite(minY) &&
-        Number.isFinite(maxY)
-      ) {
-        const width = maxX - minX;
-        const height = maxY - minY;
-
-        return {
-          left: minX,
-          top: minY,
-          width,
-          height,
-        };
-      }
-    }
-
-    // Strategy 2: Calculate bounds manually accounting for panZ perspective.
-    // panZ creates a perspective effect that enlarges the mesh visually.
-    // For panZ(1.5), the visual magnification is approximately 1.3-1.4x.
-    const scale = this.mesh.scaleX;
-
-    // Calculate perspective magnification from panZ.
-    // The mesh.modelPosition.z (set by panZ) affects the perceived size.
-    const panZValue = this.mesh.modelPosition.z;
-    const perspectiveMagnification = 1 + panZValue * 0.2; // Approximate formula
-
-    const visualWidth = texWidth * scale * perspectiveMagnification;
-    const visualHeight = texHeight * scale * perspectiveMagnification;
 
     return {
-      left: this.mesh.x - visualWidth / 2,
-      top: this.mesh.y - visualHeight / 2,
-      width: visualWidth,
-      height: visualHeight,
+      left: minX,
+      top: minY,
+      width: maxX - minX,
+      height: maxY - minY,
     };
   }
   public localToWorld(u: number, v: number): { x: number; y: number } {
-    if (!this.mesh) {
-      return { x: 0, y: 0 }; // Nothing to project without the object.
-    }
-
     const bounds = this.getMeshVisualBounds();
     if (!bounds) {
       return { x: 0, y: 0 };
@@ -420,11 +363,11 @@ export default class GameScene extends Phaser.Scene {
     const clampedU = this.clampUV(u);
     const clampedV = this.clampUV(v);
 
-    // Convert UV back to world position using actual projected bounds.
+    // Convert UV to world position using actual mesh bounds.
     const x = bounds.left + clampedU * bounds.width;
     const y = bounds.top + clampedV * bounds.height;
 
-    return { x, y }; // Convert UV back to screen coords using actual visual bounds.
+    return { x, y };
   }
 
   /**

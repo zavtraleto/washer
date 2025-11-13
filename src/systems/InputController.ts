@@ -25,6 +25,7 @@ export class InputController {
     if (this.locked) return;
 
     this.inputActive = true;
+    this.triggerHaptic();
     this.tiltController.startInteraction();
     this.tool.handleDown(x, y, t);
   }
@@ -89,5 +90,14 @@ export class InputController {
    */
   isLocked(): boolean {
     return this.locked;
+  }
+
+  /**
+   * Trigger haptic feedback (vibration) on supported devices.
+   */
+  private triggerHaptic(): void {
+    if ('vibrate' in navigator) {
+      navigator.vibrate(15); // 15ms pulse
+    }
   }
 }

@@ -8,6 +8,7 @@ export class InputService {
   private moveCallbacks: Array<(p: PointerSample) => void> = [];
   private upCallbacks: Array<(p: PointerSample) => void> = [];
   private isDown = false;
+  private activePointerId: number | null = null; // Track which pointer is active
 
   constructor(private readonly scene: Phaser.Scene) {
     const input = scene.input;
@@ -36,13 +37,17 @@ export class InputService {
     this.downCallbacks = [];
     this.moveCallbacks = [];
     this.upCallbacks = [];
+    this.isDown = false;
+    this.activePointerId = null;
   }
 
   private handleDown(pointer: Phaser.Input.Pointer): void {
-    if (pointer.id !== 0) {
-      return; // Single-pointer MVP; ignore extras.
+    // Accept the first pointer that presses down (mouse or touch)
+    if (this.isDown) {
+      return; // Already have an active pointer; ignore others.
     }
     this.isDown = true;
+    this.activePointerId = pointer.id;
     const sample = this.sample(pointer);
     for (const cb of this.downCallbacks) {
       cb(sample);
@@ -50,8 +55,9 @@ export class InputService {
   }
 
   private handleMove(pointer: Phaser.Input.Pointer): void {
-    if (!this.isDown || pointer.id !== 0) {
-      return; // Only emit move samples while active pointer is down.
+    // Only track the active pointer
+    if (!this.isDown || pointer.id !== this.activePointerId) {
+      return;
     }
     const sample = this.sample(pointer);
     for (const cb of this.moveCallbacks) {
@@ -60,10 +66,12 @@ export class InputService {
   }
 
   private handleUp(pointer: Phaser.Input.Pointer): void {
-    if (pointer.id !== 0) {
+    // Only respond to the active pointer releasing
+    if (pointer.id !== this.activePointerId) {
       return;
     }
     this.isDown = false;
+    this.activePointerId = null;
     const sample = this.sample(pointer);
     for (const cb of this.upCallbacks) {
       cb(sample);

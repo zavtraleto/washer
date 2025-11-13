@@ -10,6 +10,11 @@ interface TiltConfig {
   tiltSpeed: number; // Lerp speed when actively tilting.
 }
 
+// Visual bounds provider for accurate tilt calculations.
+export interface VisualBoundsProvider {
+  (): { left: number; top: number; width: number; height: number } | null;
+}
+
 // Manages mesh tilt with spring physics for reactive feel.
 export class TiltController {
   private currentTiltX = 0; // Current rotation X in radians.
@@ -23,13 +28,23 @@ export class TiltController {
   constructor(
     private readonly mesh: Phaser.GameObjects.Mesh,
     private readonly config: TiltConfig,
+    private readonly boundsProvider?: VisualBoundsProvider,
   ) {}
 
   // Set pointer target relative to mesh (normalized -1..1).
   setPointerTarget(pointerX: number, pointerY: number): void {
-    // Calculate normalized offset from mesh center.
-    const dx = (pointerX - this.mesh.x) / (this.mesh.displayWidth * 0.5);
-    const dy = (pointerY - this.mesh.y) / (this.mesh.displayHeight * 0.5);
+    // Get actual visual bounds (accounts for panZ perspective).
+    const bounds = this.boundsProvider?.();
+    if (!bounds) {
+      return; // Can't calculate tilt without bounds.
+    }
+
+    const centerX = bounds.left + bounds.width / 2;
+    const centerY = bounds.top + bounds.height / 2;
+
+    // Calculate normalized offset from visual center.
+    const dx = (pointerX - centerX) / (bounds.width * 0.5);
+    const dy = (pointerY - centerY) / (bounds.height * 0.5);
 
     // Clamp to prevent extreme tilts at edges.
     const clampedDx = MathUtils.clamp(dx, -1, 1);

@@ -20,14 +20,6 @@ export function getCatalog(): Catalog {
         debugColor: 0x8a5a2b,
       },
     ],
-    // tool: {
-    //   id: 'water_jet',
-    //   spacing: 10,
-    //   falloff: 'soft',
-    //   jitter: 0.08,
-    //   strength: 1.0,
-    //   speedBoost: true,
-    // },
     tools: {
       scrubber: {
         id: 'scrubber',
