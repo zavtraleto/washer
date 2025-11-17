@@ -1,7 +1,6 @@
 import Phaser from 'phaser';
 import { MathUtils } from '../utils/MathUtils';
-import type { GameEventDispatcher } from '../services/GameEventDispatcher';
-import type { StampAppliedPayload } from '../types/events';
+import { GameEvents, type StampAppliedPayload } from '../types/events';
 
 const TEXTURE_KEY = 'particle_circle';
 const DEBUG_PARTICLES = true; // Enable to see particle spawn counts.
@@ -99,7 +98,7 @@ export class ParticlesSystem {
   constructor(
     private readonly scene: Phaser.Scene,
     private readonly objectMesh: Phaser.GameObjects.Mesh,
-    private readonly eventDispatcher: GameEventDispatcher,
+    private readonly eventDispatcher: Phaser.Events.EventEmitter,
   ) {
     this.ensureTexture();
     this.depth = this.objectMesh.depth + 1;
@@ -116,7 +115,11 @@ export class ParticlesSystem {
     }
 
     // Listen for STAMP_APPLIED events to spawn particles.
-    this.eventDispatcher.onStampApplied(this.handleStampApplied, this);
+    this.eventDispatcher.on(
+      GameEvents.STAMP_APPLIED,
+      this.handleStampApplied,
+      this,
+    );
   }
 
   /**
@@ -278,7 +281,11 @@ export class ParticlesSystem {
 
   destroy(): void {
     // Unsubscribe from events.
-    this.eventDispatcher.offStampApplied(this.handleStampApplied);
+    this.eventDispatcher.off(
+      GameEvents.STAMP_APPLIED,
+      this.handleStampApplied,
+      this,
+    );
 
     this.clear();
     const allParticles = [...this.waterParticles, ...this.dirtParticles];

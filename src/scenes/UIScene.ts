@@ -1,14 +1,11 @@
 import Phaser from 'phaser';
 import { MathUtils } from '../utils/MathUtils';
-import { eventBus } from '../services/EventBus';
 import { GameEvents } from '../types/events';
 
 const TOP_PADDING = 24;
 const BAR_PADDING = 12;
 const BAR_HEIGHT = 8;
 const BAR_WIDTH_RATIO = 0.6;
-const TOOL_BUTTON_SIZE = 48;
-const TOOL_BUTTON_SPACING = 8;
 const TEXT_STYLE: Phaser.Types.GameObjects.Text.TextStyle = {
   fontFamily: 'Inter, Arial, sans-serif',
   fontSize: '18px',
@@ -22,11 +19,6 @@ export default class UIScene extends Phaser.Scene {
   private bar!: Phaser.GameObjects.Graphics;
   private btnRestart!: Phaser.GameObjects.Text;
   private btnNext!: Phaser.GameObjects.Text;
-  private toolButtons!: {
-    scrubber: Phaser.GameObjects.Container;
-    powerwash: Phaser.GameObjects.Container;
-  };
-  private activeTool: 'scrubber' | 'powerwash' = 'scrubber';
   private barWidth = 0;
   private readonly handleResize = () => this.layout(); // Keep UI centered on resize.
 
@@ -40,13 +32,12 @@ export default class UIScene extends Phaser.Scene {
       .setOrigin(0.5, 0);
     this.bar = this.add.graphics();
     this.createButtons();
-    this.createToolButtons();
     this.layout(); // Call layout after creating all UI elements.
     this.drawBar();
-    eventBus.on(GameEvents.PROGRESS, this.handleProgress, this); // Listen for clean percent updates.
-    eventBus.on(GameEvents.WIN, this.handleWin, this); // Reveal Next button on win.
-    eventBus.on(GameEvents.RESTART, this.handleReset, this);
-    eventBus.on(GameEvents.NEXT, this.handleReset, this);
+    this.game.events.on(GameEvents.PROGRESS, this.handleProgress, this); // Listen for clean percent updates.
+    this.game.events.on(GameEvents.WIN, this.handleWin, this); // Reveal Next button on win.
+    this.game.events.on(GameEvents.RESTART, this.handleReset, this);
+    this.game.events.on(GameEvents.NEXT, this.handleReset, this);
     this.scale.on('resize', this.handleResize, this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.onShutdown, this);
   }
@@ -74,15 +65,6 @@ export default class UIScene extends Phaser.Scene {
     if (this.btnNext) {
       this.btnNext.setPosition(width - 16, TOP_PADDING + 24);
     }
-    if (this.toolButtons) {
-      // Position tool buttons side-by-side at bottom-left corner.
-      const bottomY = this.scale.height - 16 - TOOL_BUTTON_SIZE;
-      this.toolButtons.scrubber.setPosition(16, bottomY);
-      this.toolButtons.powerwash.setPosition(
-        16 + TOOL_BUTTON_SIZE + TOOL_BUTTON_SPACING,
-        bottomY,
-      );
-    }
   }
 
   private drawBar(): void {
@@ -106,7 +88,7 @@ export default class UIScene extends Phaser.Scene {
       .setOrigin(1, 0)
       .setInteractive({ useHandCursor: true });
     this.btnRestart.on('pointerup', () => {
-      eventBus.emit(GameEvents.RESTART); // what: restart requested by player.
+      this.game.events.emit(GameEvents.RESTART); // what: restart requested by player.
     });
 
     this.btnNext = this.add
@@ -115,7 +97,7 @@ export default class UIScene extends Phaser.Scene {
       .setInteractive({ useHandCursor: true })
       .setVisible(false);
     this.btnNext.on('pointerup', () => {
-      eventBus.emit(GameEvents.NEXT); // what: advance to new seed.
+      this.game.events.emit(GameEvents.NEXT); // what: advance to new seed.
     });
   }
 
@@ -128,104 +110,11 @@ export default class UIScene extends Phaser.Scene {
     this.target = 0;
   }
 
-  private createToolButtons(): void {
-    // Create tool button helper.
-    const createToolButton = (
-      toolId: 'scrubber' | 'powerwash',
-      icon: string,
-    ): Phaser.GameObjects.Container => {
-      const container = this.add.container(0, 0);
-
-      // Background (square button) - use Rectangle instead of Graphics for better hit detection.
-      const bg = this.add.rectangle(
-        TOOL_BUTTON_SIZE / 2,
-        TOOL_BUTTON_SIZE / 2,
-        TOOL_BUTTON_SIZE,
-        TOOL_BUTTON_SIZE,
-        0x2a2d35,
-        0.9,
-      );
-      bg.setStrokeStyle(2, 0x61d5ff, 0);
-
-      // Icon/Label.
-      const text = this.add
-        .text(TOOL_BUTTON_SIZE / 2, TOOL_BUTTON_SIZE / 2, icon, {
-          fontFamily: 'Inter, Arial, sans-serif',
-          fontSize: '20px',
-          color: '#f2f3f5',
-        })
-        .setOrigin(0.5);
-
-      container.add([bg, text]);
-      container.setSize(TOOL_BUTTON_SIZE, TOOL_BUTTON_SIZE);
-
-      // Make the background rectangle interactive.
-      bg.setInteractive({ useHandCursor: true });
-
-      // Store references for visual updates.
-      (container as any).bg = bg;
-      (container as any).toolId = toolId;
-
-      // Wire up events to the background rectangle.
-      bg.on('pointerdown', () => {
-        this.switchTool(toolId);
-      });
-
-      // Hover effect.
-      bg.on('pointerover', () => {
-        if (this.activeTool !== toolId) {
-          bg.setFillStyle(0x35383f, 0.9);
-        }
-      });
-
-      bg.on('pointerout', () => {
-        this.updateToolButtonVisuals();
-      });
-
-      return container;
-    };
-
-    // Create buttons for both tools.
-    this.toolButtons = {
-      scrubber: createToolButton('scrubber', '🧽'),
-      powerwash: createToolButton('powerwash', '💧'),
-    };
-
-    this.updateToolButtonVisuals();
-  }
-
-  private switchTool(toolId: 'scrubber' | 'powerwash'): void {
-    if (this.activeTool === toolId) return; // Already active.
-
-    this.activeTool = toolId;
-    this.updateToolButtonVisuals();
-
-    // Emit event to GameScene to switch tool.
-    eventBus.emit(GameEvents.SWITCH_TOOL, toolId);
-  }
-
-  private updateToolButtonVisuals(): void {
-    // Update button backgrounds to show active/inactive state.
-    for (const [toolId, container] of Object.entries(this.toolButtons)) {
-      const bg = (container as any).bg as Phaser.GameObjects.Rectangle;
-
-      if (this.activeTool === toolId) {
-        // Active: bright background with border.
-        bg.setFillStyle(0x61d5ff, 0.25);
-        bg.setStrokeStyle(2, 0x61d5ff, 1);
-      } else {
-        // Inactive: dark background, no border.
-        bg.setFillStyle(0x2a2d35, 0.9);
-        bg.setStrokeStyle(2, 0x61d5ff, 0);
-      }
-    }
-  }
-
   private onShutdown(): void {
-    eventBus.off(GameEvents.PROGRESS, this.handleProgress);
-    eventBus.off(GameEvents.WIN, this.handleWin);
-    eventBus.off(GameEvents.RESTART, this.handleReset);
-    eventBus.off(GameEvents.NEXT, this.handleReset);
+    this.game.events.off(GameEvents.PROGRESS, this.handleProgress, this);
+    this.game.events.off(GameEvents.WIN, this.handleWin, this);
+    this.game.events.off(GameEvents.RESTART, this.handleReset, this);
+    this.game.events.off(GameEvents.NEXT, this.handleReset, this);
     this.scale.off('resize', this.handleResize, this);
   }
 }

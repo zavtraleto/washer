@@ -6,18 +6,9 @@
 import Phaser from 'phaser';
 import { BaseTool } from './BaseTool';
 import { StrokeSystem } from '../systems/StrokeSystem';
-import type { IToolConfig } from '../types/tools';
 import type { DirtSystem } from '../systems/DirtSystem';
-import type { GameEventDispatcher } from '../services/GameEventDispatcher';
 import type { TiltController } from '../systems/TiltController';
-
-/** Configuration specific to scrubbing tool. */
-export interface ScrubbingToolConfig extends IToolConfig {
-  spacing: number; // Distance between stamps (px).
-  jitter: number; // Random radius variation (0-1).
-  strength: number; // Dirt removal strength.
-  speedBoost: boolean; // Whether to enlarge radius at high speed.
-}
+import { ScrubbingConfig } from 'src/types/config';
 
 export class ScrubbingTool extends BaseTool {
   private strokeSystem: StrokeSystem;
@@ -25,10 +16,10 @@ export class ScrubbingTool extends BaseTool {
 
   constructor(
     scene: Phaser.Scene,
-    config: ScrubbingToolConfig,
+    config: ScrubbingConfig,
     dirtSystem: DirtSystem,
     worldToUV: (x: number, y: number) => { u: number; v: number },
-    eventDispatcher: GameEventDispatcher,
+    eventDispatcher: Phaser.Events.EventEmitter,
     tiltController: TiltController,
   ) {
     super(config);
@@ -38,12 +29,11 @@ export class ScrubbingTool extends BaseTool {
     this.strokeSystem = new StrokeSystem(
       scene,
       {
-        id: 'water_jet', // Legacy ID from catalog.
+        id: 'scrubbing',
         spacing: config.spacing,
         falloff: 'soft',
         jitter: config.jitter,
         strength: config.strength,
-        speedBoost: config.speedBoost,
       },
       dirtSystem,
       worldToUV,

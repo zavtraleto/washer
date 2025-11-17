@@ -28,9 +28,8 @@ export class DirtTextureRenderer {
     private readonly scene: Phaser.Scene,
     private readonly mesh: Phaser.GameObjects.Mesh,
     baseTextureKey: string,
-    config: Partial<DirtRenderConfig> = {},
   ) {
-    this.config = { ...DEFAULT_CONFIG, ...config };
+    this.config = { ...DEFAULT_CONFIG };
     this.textureKey = `${baseTextureKey}_dirty`;
 
     // Create dynamic canvas texture for blending.

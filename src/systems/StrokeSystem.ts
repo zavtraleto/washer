@@ -3,7 +3,7 @@ import Phaser from 'phaser';
 // import type { ToolConfig } from '../types/config';
 import { DirtSystem } from './DirtSystem';
 import { MathUtils } from '../utils/MathUtils';
-import type { GameEventDispatcher } from '../services/GameEventDispatcher';
+import { GameEvents } from '../types/events';
 
 /**
  * StrokeSystem — converts drag path into evenly-spaced stamps with soft falloff.
@@ -27,7 +27,7 @@ export class StrokeSystem {
       x: number,
       y: number,
     ) => { u: number; v: number },
-    private readonly eventDispatcher: GameEventDispatcher,
+    private readonly eventDispatcher: Phaser.Events.EventEmitter,
   ) {
     this.rng = new Phaser.Math.RandomDataGenerator([scene.time.now.toString()]);
   }
@@ -139,7 +139,7 @@ export class StrokeSystem {
     const intensity = MathUtils.clamp(travel / spacing, 0.4, 1.4);
     const dirtValue = this.dirt.getUnionDirtyValueAt(u, v);
 
-    this.eventDispatcher.emitStampApplied({
+    this.eventDispatcher.emit(GameEvents.STAMP_APPLIED, {
       worldX: x,
       worldY: y,
       dirX: normalized.x,

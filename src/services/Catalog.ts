@@ -3,9 +3,9 @@ import type { Catalog } from '../types/config';
 export function getCatalog(): Catalog {
   return {
     object: {
-      id: 'key_v1',
+      id: 'shield',
       sprite: 'objects/shield.png',
-    },
+    }, //TODO expand to objects, add road_sign, etc.
     layers: [
       {
         id: 'mold',
@@ -27,21 +27,6 @@ export function getCatalog(): Catalog {
         spacing: 10,
         jitter: 0.08,
         strength: 1.0,
-        speedBoost: true,
-      },
-      powerwash: {
-        id: 'powerwash',
-        name: 'Power Wash',
-        sourceAnchorX: 0.95,
-        sourceAnchorY: 0.95,
-        springStiffness: 0.08,
-        springDamping: 0.45,
-        pressureRiseSpeed: 4,
-        pressureFallSpeed: 2.5,
-        baseStrength: 8.0,
-        jitter: 0.1,
-        streamWidth: 8,
-        streamColor: 0x4da6ff,
       },
     },
   };

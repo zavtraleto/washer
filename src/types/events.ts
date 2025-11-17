@@ -1,37 +1,34 @@
 /**
- * Game event type definitions for type-safe EventBus usage.
+ * Game event constants for Phaser event system.
+ * Use with scene.game.events (cross-scene) or scene.events (within-scene).
  */
 
-// UI/Lifecycle events (cross-scene communication)
 export const GameEvents = {
+  // Cross-scene events (use with this.game.events)
   /** Fired when cleaning progress updates. Payload: clean percentage (0-100). */
-  PROGRESS: 'PROGRESS',
+  PROGRESS: 'game:progress',
 
   /** Fired when win condition is met (≥95% clean). No payload. */
-  WIN: 'WIN',
+  WIN: 'game:win',
 
   /** Fired when user clicks Restart button. No payload. */
-  RESTART: 'RESTART',
+  RESTART: 'game:restart',
 
   /** Fired when user clicks Next button after winning. No payload. */
-  NEXT: 'NEXT',
+  NEXT: 'game:next',
 
   /** Fired when user switches tools. Payload: tool id ('scrubber' | 'powerwash'). */
-  SWITCH_TOOL: 'SWITCH_TOOL',
-} as const;
+  SWITCH_TOOL: 'game:switch-tool',
 
-// Gameplay events (within-scene mechanics)
-export const GameplayEvents = {
+  // Within-scene events (use with this.events or custom EventEmitter)
   /** Fired when a cleaning stamp is applied. Payload: stamp details. */
-  STAMP_APPLIED: 'STAMP_APPLIED',
+  STAMP_APPLIED: 'stamp:applied',
 
   /** Fired when dirt is cleared from an area. Payload: clear details. */
-  DIRT_CLEARED: 'DIRT_CLEARED',
+  DIRT_CLEARED: 'dirt:cleared',
 } as const;
 
 export type GameEventType = (typeof GameEvents)[keyof typeof GameEvents];
-export type GameplayEventType =
-  (typeof GameplayEvents)[keyof typeof GameplayEvents];
 
 /** Stamp applied event payload. */
 export interface StampAppliedPayload {
@@ -56,10 +53,6 @@ export interface GameEventPayloads {
   [GameEvents.WIN]: void;
   [GameEvents.RESTART]: void;
   [GameEvents.NEXT]: void;
-}
-
-/** Type-safe event payload mapping for gameplay events. */
-export interface GameplayEventPayloads {
-  [GameplayEvents.STAMP_APPLIED]: StampAppliedPayload;
-  [GameplayEvents.DIRT_CLEARED]: DirtClearedPayload;
+  [GameEvents.STAMP_APPLIED]: StampAppliedPayload;
+  [GameEvents.DIRT_CLEARED]: DirtClearedPayload;
 }

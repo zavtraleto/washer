@@ -25,7 +25,6 @@ export class InputController {
     if (this.locked) return;
 
     this.inputActive = true;
-    this.triggerHaptic();
     this.tiltController.startInteraction();
     this.tool.handleDown(x, y, t);
   }
@@ -89,26 +88,5 @@ export class InputController {
    */
   isLocked(): boolean {
     return this.locked;
-  }
-
-  /**
-   * Update the active tool without recreating the controller.
-   * @param tool - New tool to activate.
-   */
-  setTool(tool: ITool): void {
-    if (this.tool !== tool) {
-      this.tool.deactivate();
-      this.tool = tool;
-      this.tool.activate();
-    }
-  }
-
-  /**
-   * Trigger haptic feedback (vibration) on supported devices.
-   */
-  private triggerHaptic(): void {
-    if ('vibrate' in navigator) {
-      navigator.vibrate(15); // 15ms pulse
-    }
   }
 }
