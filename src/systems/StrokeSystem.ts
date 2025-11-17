@@ -101,6 +101,16 @@ export class StrokeSystem {
     // Reserved for future smoothing/throttling.
   }
 
+  reset(): void {
+    this.lastX = 0;
+    this.lastY = 0;
+    this.lastT = 0;
+    this.residual = 0;
+    this.stamped = false;
+    this.lastDirX = 0;
+    this.lastDirY = -1;
+  }
+
   didStampSinceLastCheck(): boolean {
     const result = this.stamped;
     this.stamped = false;

@@ -206,6 +206,7 @@ export default class GameScene extends Phaser.Scene {
       this.dirt,
       (wx, wy) => this.worldToLocal(wx, wy),
       this.gameplayEvents,
+      this.tiltController,
     );
 
     // Create power wash tool with catalog config.
@@ -217,6 +218,7 @@ export default class GameScene extends Phaser.Scene {
         (wx, wy) => this.worldToLocal(wx, wy),
         isPointOnObject,
         this.gameplayEvents,
+        this.tiltController,
       );
     }
 
@@ -376,8 +378,7 @@ export default class GameScene extends Phaser.Scene {
    */
   public switchTool(tool: ITool): void {
     this.toolManager.setActiveTool(tool);
-    // Update InputController to use the new tool.
-    this.inputController = new InputController(this.tiltController, tool);
+    this.inputController.setTool(tool);
   }
 
   /**

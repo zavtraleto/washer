@@ -40,7 +40,6 @@ export class InputController {
     if (this.locked) return;
 
     this.tool.handleMove(x, y, t);
-    this.tiltController.setPointerTarget(x, y);
   }
 
   /**
@@ -90,6 +89,18 @@ export class InputController {
    */
   isLocked(): boolean {
     return this.locked;
+  }
+
+  /**
+   * Update the active tool without recreating the controller.
+   * @param tool - New tool to activate.
+   */
+  setTool(tool: ITool): void {
+    if (this.tool !== tool) {
+      this.tool.deactivate();
+      this.tool = tool;
+      this.tool.activate();
+    }
   }
 
   /**

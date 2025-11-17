@@ -22,7 +22,13 @@ export abstract class BaseTool implements ITool {
    */
   deactivate(): void {
     this.active = false;
+    this.reset?.();
   }
+
+  /**
+   * Reset tool state (optional, override for tool-specific state clearing).
+   */
+  reset?(): void;
 
   /**
    * Check if tool is currently active.

@@ -9,6 +9,7 @@ import { StrokeSystem } from '../systems/StrokeSystem';
 import type { IToolConfig } from '../types/tools';
 import type { DirtSystem } from '../systems/DirtSystem';
 import type { GameEventDispatcher } from '../services/GameEventDispatcher';
+import type { TiltController } from '../systems/TiltController';
 
 /** Configuration specific to scrubbing tool. */
 export interface ScrubbingToolConfig extends IToolConfig {
@@ -20,6 +21,7 @@ export interface ScrubbingToolConfig extends IToolConfig {
 
 export class ScrubbingTool extends BaseTool {
   private strokeSystem: StrokeSystem;
+  private tiltController: TiltController;
 
   constructor(
     scene: Phaser.Scene,
@@ -27,8 +29,10 @@ export class ScrubbingTool extends BaseTool {
     dirtSystem: DirtSystem,
     worldToUV: (x: number, y: number) => { u: number; v: number },
     eventDispatcher: GameEventDispatcher,
+    tiltController: TiltController,
   ) {
     super(config);
+    this.tiltController = tiltController;
 
     // Create internal stroke system for stamp-based cleaning.
     this.strokeSystem = new StrokeSystem(
@@ -49,11 +53,13 @@ export class ScrubbingTool extends BaseTool {
 
   handleDown(worldX: number, worldY: number, timestamp: number): void {
     if (!this.active) return;
+    this.tiltController.setPointerTarget(worldX, worldY);
     this.strokeSystem.handleDown(worldX, worldY, timestamp);
   }
 
   handleMove(worldX: number, worldY: number, timestamp: number): void {
     if (!this.active) return;
+    this.tiltController.setPointerTarget(worldX, worldY);
     this.strokeSystem.handleMove(worldX, worldY, timestamp);
   }
 
@@ -76,6 +82,13 @@ export class ScrubbingTool extends BaseTool {
     isOnObject: boolean,
   ): boolean {
     return isOnObject; // Only allow scrubbing on the object surface.
+  }
+
+  /**
+   * Reset stroke state when deactivating tool.
+   */
+  override reset(): void {
+    this.strokeSystem.reset();
   }
 
   /**

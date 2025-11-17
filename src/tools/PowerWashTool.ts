@@ -8,6 +8,7 @@ import { BaseTool } from './BaseTool';
 import type { IToolConfig } from '../types/tools';
 import type { DirtSystem } from '../systems/DirtSystem';
 import type { GameEventDispatcher } from '../services/GameEventDispatcher';
+import type { TiltController } from '../systems/TiltController';
 
 export interface PowerWashToolConfig extends IToolConfig {
   sourceAnchorX: number; // Corner position 0..1.
@@ -27,6 +28,7 @@ export class PowerWashTool extends BaseTool {
   private worldToUV: (x: number, y: number) => { u: number; v: number };
   private isPointOnObject: (x: number, y: number) => boolean;
   private eventDispatcher: GameEventDispatcher;
+  private tiltController: TiltController;
   private cfg: PowerWashToolConfig;
 
   private sourceX = 0;
@@ -47,6 +49,7 @@ export class PowerWashTool extends BaseTool {
     worldToUV: (x: number, y: number) => { u: number; v: number },
     isPointOnObject: (x: number, y: number) => boolean,
     eventDispatcher: GameEventDispatcher,
+    tiltController: TiltController,
   ) {
     super(config);
     this.cfg = config;
@@ -54,6 +57,7 @@ export class PowerWashTool extends BaseTool {
     this.worldToUV = worldToUV;
     this.isPointOnObject = isPointOnObject;
     this.eventDispatcher = eventDispatcher;
+    this.tiltController = tiltController;
 
     this.graphics = scene.add.graphics().setDepth(1000);
 
@@ -136,6 +140,9 @@ export class PowerWashTool extends BaseTool {
     this.velY += forceY;
     this.nozzleX += this.velX * dt * 60;
     this.nozzleY += this.velY * dt * 60;
+
+    // Update tilt to where stream is actually hitting (nozzle position with lag).
+    this.tiltController.setPointerTarget(this.nozzleX, this.nozzleY);
 
     // Draw stream from source to nozzle (lagged cleaning point).
     this.graphics.clear();
