@@ -38,9 +38,9 @@ export abstract class BaseTool implements ITool {
   }
 
   // Abstract methods - concrete tools must implement these.
-  abstract handleDown(worldX: number, worldY: number, timestamp: number): void;
-  abstract handleMove(worldX: number, worldY: number, timestamp: number): void;
-  abstract handleUp(worldX: number, worldY: number, timestamp: number): void;
+  abstract handlePointerDown(worldX: number, worldY: number): void;
+  abstract handlePointerMove(worldX: number, worldY: number): void;
+  abstract handlePointerUp(worldX: number, worldY: number): void;
   abstract update(deltaMs: number): void;
   abstract isValidInputLocation(
     worldX: number,

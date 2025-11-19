@@ -12,7 +12,6 @@ import { GameEvents } from '../types/events';
 export class StrokeSystem {
   private lastX = 0;
   private lastY = 0;
-  private lastT = 0;
   private residual = 0;
   private stamped = false;
   private readonly rng: Phaser.Math.RandomDataGenerator;
@@ -32,22 +31,20 @@ export class StrokeSystem {
     this.rng = new Phaser.Math.RandomDataGenerator([scene.time.now.toString()]);
   }
 
-  handleDown(x: number, y: number, t: number): void {
+  handleDown(x: number, y: number): void {
     this.lastX = x;
     this.lastY = y;
-    this.lastT = t;
     this.residual = 0;
     this.lastDirX = 0;
     this.lastDirY = -1;
-    this.placeStamp(x, y, 0, 0, this.lastDirX, this.lastDirY);
+    this.placeStamp(x, y, 0, this.lastDirX, this.lastDirY);
   }
 
-  handleMove(x: number, y: number, t: number): void {
+  handleMove(x: number, y: number): void {
     const dx = x - this.lastX;
     const dy = y - this.lastY;
     const dist = Math.sqrt(dx * dx + dy * dy);
     const spacing = Math.max(1, this.tool.spacing);
-    const dt = Math.max(0, t - this.lastT);
 
     this.residual = Math.min(this.residual, spacing);
 
@@ -64,8 +61,7 @@ export class StrokeSystem {
       const ratio = MathUtils.clamp(travelledAlongSegment / dist, 0, 1);
       const sx = Phaser.Math.Linear(this.lastX, x, ratio);
       const sy = Phaser.Math.Linear(this.lastY, y, ratio);
-      const stampDt = dt * (needed / Math.max(dist, spacing));
-      this.placeStamp(sx, sy, needed, stampDt, dirX, dirY);
+      this.placeStamp(sx, sy, needed, dirX, dirY);
       this.residual = 0;
     }
 
@@ -73,28 +69,22 @@ export class StrokeSystem {
     this.residual += Math.max(0, remaining);
     this.lastX = x;
     this.lastY = y;
-    this.lastT = t;
     if (dist > 0) {
       this.lastDirX = dirX;
       this.lastDirY = dirY;
     }
-
-    if (dist === 0 && dt > 0) {
-      this.placeStamp(x, y, 0, dt, this.lastDirX, this.lastDirY);
-    }
   }
 
-  handleUp(x: number, y: number, t: number): void {
+  handleUp(x: number, y: number): void {
     const dx = x - this.lastX;
     const dy = y - this.lastY;
     const dist = Math.sqrt(dx * dx + dy * dy);
-    const dt = Math.max(0, t - this.lastT);
     const dirX = dist > 0 ? dx / dist : this.lastDirX;
     const dirY = dist > 0 ? dy / dist : this.lastDirY;
-    this.placeStamp(x, y, dist, dt, dirX, dirY);
+    this.placeStamp(x, y, dist, dirX, dirY);
     this.lastDirX = dirX;
     this.lastDirY = dirY;
-    this.residual = 0; // Reset residual on pointer release.
+    this.residual = 0;
   }
 
   update(_dt: number): void {
@@ -104,7 +94,6 @@ export class StrokeSystem {
   reset(): void {
     this.lastX = 0;
     this.lastY = 0;
-    this.lastT = 0;
     this.residual = 0;
     this.stamped = false;
     this.lastDirX = 0;
@@ -121,18 +110,15 @@ export class StrokeSystem {
     x: number,
     y: number,
     distance: number,
-    dtMs: number,
     dirX: number,
     dirY: number,
   ): void {
     const { u, v } = this.worldToUV(x, y);
     const jitter = this.computeJitter();
-    const boost = this.computeSpeedBoost(distance, dtMs);
-    const radiusFactor = Math.max(0.2, 1 + jitter) * boost;
+    const radiusFactor = Math.max(0.2, 1 + jitter);
     this.dirt.applyStampUV(u, v, this.tool.strength, radiusFactor);
     this.stamped = true;
 
-    // Emit STAMP_APPLIED event for other systems (e.g., particles) to react.
     const normalized = this.normalizeDirection(dirX, dirY);
     const spacing = Math.max(1, this.tool.spacing);
     const travel = distance > 0 ? distance : spacing * 0.6;
@@ -153,16 +139,7 @@ export class StrokeSystem {
     if (this.tool.jitter <= 0) {
       return 0;
     }
-    return this.rng.frac() * 2 * this.tool.jitter - this.tool.jitter; // why: +/- jitter around base radius.
-  }
-
-  private computeSpeedBoost(distance: number, dtMs: number): number {
-    if (!this.tool.speedBoost || dtMs <= 0 || distance <= 0) {
-      return 1;
-    }
-    const speed = (distance / dtMs) * 1000; // px per second.
-    const normalized = MathUtils.clamp(speed / 600, 0, 1);
-    return 1 + 0.15 * normalized; // why: modest radius boost at higher pointer speed.
+    return this.rng.frac() * 2 * this.tool.jitter - this.tool.jitter;
   }
 
   private normalizeDirection(

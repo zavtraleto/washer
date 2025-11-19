@@ -8,10 +8,9 @@ import { ParticlesSystem } from '../systems/ParticlesSystem';
 import { DebugOverlay } from '../systems/DebugOverlay';
 import { TiltController } from '../systems/TiltController';
 import { RNG } from '../services/RNG';
-import { InputService } from '../services/InputService';
 import { MathUtils } from '../utils/MathUtils';
 import { GameEvents } from '../types/events';
-import { InputController } from '../systems/InputController';
+import { InputHandler } from '../systems/InputHandler';
 import { GameContext } from '../services/GameContext';
 import { ScrubbingTool } from '../tools/ScrubbingTool';
 import type { DirtLayerId } from '../types/config';
@@ -45,7 +44,7 @@ export default class GameScene extends Phaser.Scene {
   private dirtRenderer!: DirtTextureRenderer; // Renders dirt directly onto mesh texture.
   private progressTimer?: Phaser.Time.TimerEvent; // Periodic progress tick.
 
-  private inputSvc!: InputService; // Normalized pointer stream.
+  private inputHandler!: InputHandler; // Clean Phaser pointer event handler.
 
   private scrubbingTool!: ScrubbingTool; // Scrubbing/brush cleaning tool.
 
@@ -53,7 +52,6 @@ export default class GameScene extends Phaser.Scene {
 
   private debugOverlay!: DebugOverlay; // Visual debug display.
   private tiltController!: TiltController; // Mesh tilt with spring physics.
-  private inputController!: InputController; // Coordinates input with tilt + stroke systems.
 
   private gameContext!: GameContext; // Centralized game state (seed, coverage, win status).
   private overlayDirty = false; // Track texture refresh requests.
@@ -138,8 +136,6 @@ export default class GameScene extends Phaser.Scene {
     this.game.events.on(GameEvents.RESTART, this.handleRestart, this);
     this.game.events.on(GameEvents.NEXT, this.handleNext, this);
 
-    this.inputSvc = new InputService(this); // Normalize pointer events into world-space samples.
-
     // Create scrubbing tool with current catalog config.
     const scrubbingConfig = catalog.tools?.scrubber;
 
@@ -153,33 +149,15 @@ export default class GameScene extends Phaser.Scene {
     );
     this.scrubbingTool.activate();
 
-    // Initialize InputController to coordinate tilt + tool systems.
-    this.inputController = new InputController(
+    // Initialize InputHandler with callback to get active tool and tilt controller.
+    this.inputHandler = new InputHandler(
+      this,
+      () => this.scrubbingTool,
       this.tiltController,
-      this.scrubbingTool,
     );
 
     // Initialize level AFTER all systems are ready.
-    this.reinitLevel(); // what: seed dirt maps and overlay for first run.
-
-    this.inputSvc.onDown((p) => {
-      if (this.gameContext.isWon()) {
-        return; // why: lock input after win.
-      }
-      this.inputController.handleDown(p.x, p.y, p.t);
-    });
-    this.inputSvc.onMove((p) => {
-      if (this.gameContext.isWon()) {
-        return;
-      }
-      this.inputController.handleMove(p.x, p.y, p.t);
-    });
-    this.inputSvc.onUp((p) => {
-      if (this.gameContext.isWon()) {
-        return;
-      }
-      this.inputController.handleUp(p.x, p.y, p.t);
-    });
+    this.reinitLevel();
 
     this.events.on(GameEvents.STAMP_APPLIED, this.handleStampApplied, this);
 
@@ -298,7 +276,7 @@ export default class GameScene extends Phaser.Scene {
     const tilt = this.tiltController.getTiltDegrees();
     this.debugOverlay.updateStats({
       dirtProgress: cleanPercent,
-      inputActive: this.inputController.isActive(),
+      inputActive: false,
       tiltX: tilt.x,
       tiltY: tilt.y,
       particleCount: this.particles.getActiveCount(),
@@ -324,7 +302,7 @@ export default class GameScene extends Phaser.Scene {
 
   private handleWin(_cleanPercent: number): void {
     this.gameContext.setWon();
-    this.inputController.lock(); // Lock input when win condition met.
+    this.inputHandler.lock();
 
     // Instantly wipe remaining dirt (final 5%).
     this.dirt.clearAll();
@@ -355,7 +333,7 @@ export default class GameScene extends Phaser.Scene {
     const cleanPercent = (1 - this.dirt.getUnionDirtyRatio()) * 100;
     this.game.events.emit(GameEvents.PROGRESS, cleanPercent);
     this.overlayDirty = false;
-    this.inputController.unlock(); // Unlock input after reset for new round.
+    this.inputHandler.unlock();
     if (this.particles) {
       this.particles.clear();
     }
@@ -366,12 +344,12 @@ export default class GameScene extends Phaser.Scene {
   }
 
   private onShutdown(): void {
-    this.scale.off('resize', this.handleResize, this); // Remove resize handler when scene shuts down.
+    this.scale.off('resize', this.handleResize, this);
     this.progressTimer?.remove();
     this.game.events.off(GameEvents.RESTART, this.handleRestart, this);
     this.game.events.off(GameEvents.NEXT, this.handleNext, this);
     this.events.off(GameEvents.STAMP_APPLIED, this.handleStampApplied, this);
-    this.inputSvc.destroy();
+    this.inputHandler.destroy();
     this.dirtRenderer.destroy();
     this.particles.destroy();
   }

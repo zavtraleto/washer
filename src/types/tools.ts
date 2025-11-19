@@ -28,25 +28,22 @@ export interface ITool {
    * Handle pointer down event.
    * @param worldX - World-space X coordinate.
    * @param worldY - World-space Y coordinate.
-   * @param timestamp - Event timestamp in milliseconds.
    */
-  handleDown(worldX: number, worldY: number, timestamp: number): void;
+  handlePointerDown(worldX: number, worldY: number): void;
 
   /**
    * Handle pointer move event.
    * @param worldX - World-space X coordinate.
    * @param worldY - World-space Y coordinate.
-   * @param timestamp - Event timestamp in milliseconds.
    */
-  handleMove(worldX: number, worldY: number, timestamp: number): void;
+  handlePointerMove(worldX: number, worldY: number): void;
 
   /**
    * Handle pointer up event.
    * @param worldX - World-space X coordinate.
    * @param worldY - World-space Y coordinate.
-   * @param timestamp - Event timestamp in milliseconds.
    */
-  handleUp(worldX: number, worldY: number, timestamp: number): void;
+  handlePointerUp(worldX: number, worldY: number): void;
 
   /**
    * Update tool state (called every frame).

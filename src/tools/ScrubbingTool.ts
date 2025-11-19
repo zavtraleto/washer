@@ -41,21 +41,21 @@ export class ScrubbingTool extends BaseTool {
     );
   }
 
-  handleDown(worldX: number, worldY: number, timestamp: number): void {
+  handlePointerDown(worldX: number, worldY: number): void {
     if (!this.active) return;
     this.tiltController.setPointerTarget(worldX, worldY);
-    this.strokeSystem.handleDown(worldX, worldY, timestamp);
+    this.strokeSystem.handleDown(worldX, worldY);
   }
 
-  handleMove(worldX: number, worldY: number, timestamp: number): void {
+  handlePointerMove(worldX: number, worldY: number): void {
     if (!this.active) return;
     this.tiltController.setPointerTarget(worldX, worldY);
-    this.strokeSystem.handleMove(worldX, worldY, timestamp);
+    this.strokeSystem.handleMove(worldX, worldY);
   }
 
-  handleUp(worldX: number, worldY: number, timestamp: number): void {
+  handlePointerUp(worldX: number, worldY: number): void {
     if (!this.active) return;
-    this.strokeSystem.handleUp(worldX, worldY, timestamp);
+    this.strokeSystem.handleUp(worldX, worldY);
   }
 
   update(deltaMs: number): void {
